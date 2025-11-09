@@ -601,7 +601,8 @@ def register_taint_analysis_tools(mcp, services: dict):
                       
                       // Find all dangerous sinks that use this variable
                       val dangerousSinks = Set("system", "popen", "execl", "execv", "sprintf", "fprintf", "free", "delete")
-                      val sinkCalls = cpg.call.name(dangerousSinks).filter(sink => {{
+                      val sinkPattern = dangerousSinks.mkString("|")
+                      val sinkCalls = cpg.call.name(sinkPattern).filter(sink => {{
                         val sinkArgs = sink.argument.code.l
                         sinkArgs.contains(targetVar)
                       }}).l.take(20)  // Limit results
