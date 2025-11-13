@@ -7,6 +7,7 @@ import yaml
 
 from .models import (
     Config,
+    ContainerConfig,
     CPGConfig,
     JoernConfig,
     QueryConfig,
@@ -33,14 +34,24 @@ def load_config(config_path: Optional[str] = None) -> Config:
                 port=int(os.getenv("MCP_PORT", "4242")),
                 log_level=os.getenv("MCP_LOG_LEVEL", "INFO"),
             ),
+            container=ContainerConfig(
+                name=os.getenv("JOERN_CONTAINER_NAME", "joern-mcp-server"),
+                image=os.getenv("JOERN_IMAGE", "joern-mcp:latest"),
+                playground_mount=os.getenv("PLAYGROUND_MOUNT", "./playground"),
+                redis_port=int(os.getenv("REDIS_PORT", "6379")),
+                joern_http_port=int(os.getenv("JOERN_HTTP_PORT", "8080")),
+                memory_limit=os.getenv("CONTAINER_MEMORY", "4g"),
+            ),
             redis=RedisConfig(
-                host=os.getenv("REDIS_HOST", "localhost"),
+                host=os.getenv("REDIS_HOST", "127.0.0.1"),
                 port=int(os.getenv("REDIS_PORT", "6379")),
                 password=os.getenv("REDIS_PASSWORD"),
                 db=int(os.getenv("REDIS_DB", "0")),
             ),
             joern=JoernConfig(
                 binary_path=os.getenv("JOERN_BINARY_PATH", "joern"),
+                http_host=os.getenv("JOERN_HTTP_HOST", "127.0.0.1"),
+                http_port=int(os.getenv("JOERN_HTTP_PORT", "8080")),
                 memory_limit=os.getenv("JOERN_MEMORY_LIMIT", "4g"),
                 java_opts=os.getenv("JOERN_JAVA_OPTS", "-Xmx4G -Xms2G -XX:+UseG1GC -Dfile.encoding=UTF-8"),
             ),
@@ -58,9 +69,14 @@ def load_config(config_path: Optional[str] = None) -> Config:
                 cache_enabled=os.getenv("QUERY_CACHE_ENABLED", "true").lower()
                 == "true",
                 cache_ttl=int(os.getenv("QUERY_CACHE_TTL", "300")),
+                scripts_dir=os.getenv("QUERY_SCRIPTS_DIR", "/app/queries"),
+                temp_dir=os.getenv("QUERY_TEMP_DIR", "/playground/temp"),
             ),
             storage=StorageConfig(
-                workspace_root=os.getenv("WORKSPACE_ROOT", "/tmp/joern-mcp"),
+                playground_root=os.getenv("PLAYGROUND_ROOT", "/playground"),
+                codebases_dir=os.getenv("CODEBASES_DIR", "/playground/codebases"),
+                cpgs_dir=os.getenv("CPGS_DIR", "/playground/cpgs"),
+                temp_dir=os.getenv("TEMP_DIR", "/playground/temp"),
                 cleanup_on_shutdown=os.getenv("CLEANUP_ON_SHUTDOWN", "true").lower()
                 == "true",
             ),
@@ -115,6 +131,7 @@ def _dict_to_config(data: dict) -> Config:
 
     return Config(
         server=convert_config_section(ServerConfig, data.get("server", {})),
+        container=convert_config_section(ContainerConfig, data.get("container", {})),
         redis=convert_config_section(RedisConfig, data.get("redis", {})),
         joern=convert_config_section(JoernConfig, data.get("joern", {})),
         sessions=convert_config_section(SessionConfig, data.get("sessions", {})),

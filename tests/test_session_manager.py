@@ -225,21 +225,16 @@ class TestSessionManager:
         """Test successful session cleanup"""
         mock_session = Session(
             id="test-session",
-            container_id="container-123",
             source_type="github",
             source_path="https://github.com/user/repo",
             language="python",
         )
 
         mock_redis_client.get_session = AsyncMock(return_value=mock_session)
-        mock_redis_client.delete_container_mapping = AsyncMock()
         mock_redis_client.delete_session = AsyncMock()
 
         await session_manager.cleanup_session("test-session")
 
-        mock_redis_client.delete_container_mapping.assert_called_once_with(
-            "container-123"
-        )
         mock_redis_client.delete_session.assert_called_once_with("test-session")
 
     @pytest.mark.asyncio
@@ -293,9 +288,6 @@ class TestSessionManager:
         )
         mock_redis_client.get_session = AsyncMock(side_effect=sessions)
 
-        # Mock docker cleanup
-        session_manager.docker_cleanup_callback = AsyncMock()
-
         with patch.object(
             session_manager, "cleanup_session", new_callable=AsyncMock
         ) as mock_cleanup:
@@ -306,9 +298,4 @@ class TestSessionManager:
             mock_cleanup.assert_any_call("oldest")
             mock_cleanup.assert_any_call("middle")
 
-    def test_set_docker_cleanup_callback(self, session_manager):
-        """Test setting Docker cleanup callback"""
-        callback = AsyncMock()
-        session_manager.set_docker_cleanup_callback(callback)
 
-        assert session_manager.docker_cleanup_callback == callback

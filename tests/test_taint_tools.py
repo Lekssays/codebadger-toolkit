@@ -31,7 +31,6 @@ def fake_services():
     ready_id = str(uuid.uuid4())
     ready_session = Session(
         id=ready_id,
-        container_id="c1",
         source_type="local",
         source_path="/tmp",
         language="c",

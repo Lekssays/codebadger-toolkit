@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from ..exceptions import ResourceLimitError, SessionNotFoundError
-from ..models import Session, SessionConfig, SessionStatus
+from ..models import Session, SessionConfig, SessionStatus, JoernConfig
 from ..utils.redis_client import RedisClient
 
 logger = logging.getLogger(__name__)
@@ -17,16 +17,10 @@ logger = logging.getLogger(__name__)
 class SessionManager:
     """Manages CPG session lifecycle and metadata"""
 
-    def __init__(self, redis_client: RedisClient, config: SessionConfig):
+    def __init__(self, redis_client: RedisClient, config: SessionConfig, joern_config: JoernConfig):
         self.redis = redis_client
         self.config = config
-        self.docker_cleanup_callback = (
-            None  # Will be set by the service that has Docker access
-        )
-
-    def set_docker_cleanup_callback(self, callback):
-        """Set the callback function for Docker container cleanup"""
-        self.docker_cleanup_callback = callback
+        self.joern_config = joern_config
 
     async def create_session(
         self,
@@ -59,6 +53,9 @@ class SessionManager:
                 )
                 return existing_session
 
+            # Allocate a port for this session's Joern server
+            joern_port = await self._allocate_port()
+
             # Create session
             session = Session(
                 id=session_id,
@@ -66,13 +63,15 @@ class SessionManager:
                 source_path=source_path,
                 language=language,
                 status=SessionStatus.INITIALIZING.value,
+                joern_port=joern_port,
+                joern_host=self.joern_config.http_host,
                 metadata=options,
             )
 
             # Save to Redis
             await self.redis.save_session(session, self.config.ttl)
 
-            logger.info(f"Created session {session.id}")
+            logger.info(f"Created session {session.id} with Joern port {joern_port}")
             return session
 
         except Exception as e:
@@ -157,10 +156,6 @@ class SessionManager:
             if not session:
                 raise SessionNotFoundError(f"Session {session_id} not found")
 
-            # Delete container mapping if exists
-            if session.container_id:
-                await self.redis.delete_container_mapping(session.container_id)
-
             # Delete session
             await self.redis.delete_session(session_id)
 
@@ -190,10 +185,6 @@ class SessionManager:
 
             for session in sessions_to_cleanup:
                 try:
-                    # Stop Docker container if it exists and we have a cleanup callback
-                    if session.container_id and self.docker_cleanup_callback:
-                        await self.docker_cleanup_callback(session.container_id)
-
                     # Clean up session data
                     await self.cleanup_session(session.id)
                     logger.info(f"Auto-cleaned up old session {session.id}")
@@ -202,6 +193,44 @@ class SessionManager:
 
         except Exception as e:
             logger.error(f"Failed to cleanup oldest sessions: {e}")
+
+    async def _allocate_port(self) -> int:
+        """
+        Allocate an available port from the configured range for a new Joern server.
+        
+        Returns:
+            An available port number
+            
+        Raises:
+            ResourceLimitError: If no ports are available
+        """
+        try:
+            # Get all active sessions
+            active_sessions = await self.list_sessions()
+            
+            # Collect ports already in use
+            used_ports = set()
+            for session in active_sessions:
+                if session.joern_port:
+                    used_ports.add(session.joern_port)
+            
+            # Find the first available port in the range
+            for port in range(
+                self.joern_config.port_range_start,
+                self.joern_config.port_range_end + 1
+            ):
+                if port not in used_ports:
+                    logger.info(f"Allocated port {port} for new session")
+                    return port
+            
+            # No ports available
+            raise ResourceLimitError(
+                f"No available ports in range {self.joern_config.port_range_start}-"
+                f"{self.joern_config.port_range_end}"
+            )
+        except Exception as e:
+            logger.error(f"Failed to allocate port: {e}")
+            raise
 
     async def cleanup_idle_sessions(self):
         """Clean up sessions that have been idle too long"""

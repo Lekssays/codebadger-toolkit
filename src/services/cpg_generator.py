@@ -1,217 +1,151 @@
 """
-CPG Generator for creating Code Property Graphs using Docker containers
+CPG Generator for creating Code Property Graphs using joern-parse
 """
 
 import asyncio
 import logging
-from typing import AsyncIterator, Dict, Optional
+import os
+import subprocess
+from typing import Optional, Tuple
 
-import docker
-
+from ..constants import CPGS_DIR, CPG_FILENAME
 from ..exceptions import CPGGenerationError
 from ..models import CPGConfig, SessionStatus, Config
 from .session_manager import SessionManager
+from ..utils.redis_client import RedisClient
 
 logger = logging.getLogger(__name__)
 
 
 class CPGGenerator:
-    """Generates CPG from source code using Docker containers"""
-
-    # Language-specific Joern commands
-    LANGUAGE_COMMANDS = {
-        "java": "javasrc2cpg",
-        "c": "c2cpg.sh",
-        "cpp": "c2cpg.sh",
-        "javascript": "jssrc2cpg.sh",
-        "python": "pysrc2cpg",
-        "go": "gosrc2cpg",
-        "kotlin": "kotlin2cpg",
-        "csharp": "csharpsrc2cpg",
-        "ghidra": "ghidra2cpg",
-        "jimple": "jimple2cpg",
-        "php": "php2cpg",
-        "ruby": "rubysrc2cpg",
-        "swift": "swiftsrc2cpg.sh",
-    }
+    """Generates CPG from source code using joern-parse"""
 
     def __init__(
-        self, config: Config, session_manager: Optional[SessionManager] = None
+        self, config: Config, session_manager: Optional[SessionManager] = None, redis_client: Optional[RedisClient] = None
     ):
         self.config = config
         self.session_manager = session_manager
-        self.docker_client: Optional[docker.DockerClient] = None
-        self.session_containers: Dict[str, str] = {}  # session_id -> container_id
+        self.redis = redis_client
+        self.process_map = {}  # Map of session_id -> process for tracking Joern servers
 
     async def initialize(self):
-        """Initialize Docker client"""
+        """Initialize CPG generator (verify joern-parse is available)"""
         try:
-            self.docker_client = docker.from_env()
-            self.docker_client.ping()
-            logger.info("CPG Generator Docker client initialized")
+            # Check if joern-parse is available
+            result = subprocess.run(
+                ["which", "joern-parse"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                logger.info(f"joern-parse found at: {result.stdout.strip()}")
+            else:
+                logger.warning("joern-parse not found in PATH")
+            logger.info("CPG Generator initialized")
         except Exception as e:
-            logger.error(f"Failed to initialize Docker client: {e}")
-            raise CPGGenerationError(f"Docker initialization failed: {str(e)}")
-
-    async def create_session_container(
-        self, session_id: str, workspace_path: str
-    ) -> str:
-        """Create a new Docker container for a session"""
-        try:
-            container_name = f"joern-session-{session_id}"
-
-            # Container configuration for interactive Joern shell
-            container_config = {
-                "image": "joern:latest",
-                "name": container_name,
-                "detach": True,
-                "volumes": {workspace_path: {"bind": "/workspace", "mode": "rw"}},
-                "working_dir": "/workspace",
-                "environment": {"JAVA_OPTS": self.config.joern.java_opts},
-                "command": "tail -f /dev/null",  # Keep container running
-                "network_mode": "bridge",
-            }
-
-            container = self.docker_client.containers.run(**container_config)
-            container_id = container.id
-
-            self.session_containers[session_id] = container_id
-            logger.info(f"Created container {container_id} for session {session_id}")
-
-            return container_id
-
-        except Exception as e:
-            logger.error(f"Failed to create container for session {session_id}: {e}")
-            raise CPGGenerationError(f"Container creation failed: {str(e)}")
+            logger.error(f"Failed to initialize CPG generator: {e}")
+            raise CPGGenerationError(f"Initialization failed: {str(e)}")
 
     async def generate_cpg(
-        self, session_id: str, source_path: str, language: str
-    ) -> str:
-        """Generate CPG from source code in container"""
+        self, session_id: str, source_path: str, language: Optional[str] = None
+    ) -> Tuple[str, int]:
+        """
+        Generate CPG from source code using joern-parse and start Joern server on allocated port.
+
+        Args:
+            session_id: Unique session identifier
+            source_path: Path to source code directory
+            language: Optional language hint (joern-parse auto-detects)
+
+        Returns:
+            Tuple of (cpg_path, port) - path to generated CPG file and port of Joern server
+
+        Raises:
+            CPGGenerationError: If CPG generation fails
+        """
         try:
-            logger.info(f"Starting CPG generation for session {session_id}")
+            logger.info(
+                f"Starting CPG generation for session {session_id} from {source_path}"
+            )
 
             if self.session_manager:
                 await self.session_manager.update_status(
                     session_id, SessionStatus.GENERATING.value
                 )
 
-            container_id = self.session_containers.get(session_id)
-            if not container_id:
-                raise CPGGenerationError(f"No container found for session {session_id}")
-
-            container = self.docker_client.containers.get(container_id)
-
-            # Generate CPG using Joern - store in workspace directory
-            cpg_output_path = "/workspace/cpg.bin"
-            base_cmd = self.LANGUAGE_COMMANDS[language]
-            joern_cmd = await self._find_joern_executable(container, base_cmd)
+            # Get session to retrieve allocated port
+            session = await self.session_manager.get_session(session_id)
+            if not session:
+                raise CPGGenerationError(f"Session {session_id} not found")
             
-            # Compute Java options to pass to Joern. Prefer an explicit
-            # configuration value, but if the container has a memory limit set
-            # use that to tune -Xmx to avoid Java OOMs inside constrained
-            # containers. Joern script accepts Java opts prefixed with -J.
-            java_opts = self.config.joern.java_opts
+            joern_port = session.joern_port
+            if not joern_port:
+                raise CPGGenerationError(f"No port allocated for session {session_id}")
 
-            try:
-                # Inspect container to find memory limit (in bytes). A value of
-                # 0 usually means no limit.
-                container_inspect = container.attrs
-                mem_limit = 0
-                host_config = container_inspect.get("HostConfig", {})
-                if host_config:
-                    mem_limit = host_config.get("Memory", 0) or 0
+            # Create output directory for this session's CPG
+            cpg_dir = os.path.join(CPGS_DIR, session_id)
+            os.makedirs(cpg_dir, exist_ok=True)
 
-                # If mem_limit is set and reasonable, compute -Xmx as 75% of it
-                if mem_limit and mem_limit > 0:
-                    # Convert bytes to megabytes
-                    mem_mb = int(mem_limit / (1024 * 1024))
-                    xmx_mb = max(256, int(mem_mb * 0.75))
-                    # Build Java opts using Xmx and a conservative Xms (half of Xmx)
-                    xms_mb = max(128, int(xmx_mb / 2))
-                    java_opts = f"-Xmx{int(xmx_mb)}M -Xms{int(xms_mb)}M -XX:+UseG1GC -Dfile.encoding=UTF-8"
-                    logger.info(
-                        f"Computed java opts from container memory {mem_mb}MB: {java_opts}"
-                    )
-                else:
-                    # If no container memory limit, fall back to configured opts
-                    java_opts = java_opts or self.config.joern.java_opts
-            except Exception:
-                # If anything goes wrong while inspecting the container,
-                # fall back to configured java opts
-                java_opts = java_opts or self.config.joern.java_opts
+            # Output path for CPG
+            cpg_output_path = os.path.join(cpg_dir, CPG_FILENAME)
 
-            if java_opts:
-                java_flags = " ".join(f"-J{opt}" for opt in java_opts.split())
-                joern_cmd = f"{joern_cmd} {java_flags}"
+            # Build joern-parse command
+            command = ["joern-parse", source_path, "-o", cpg_output_path]
 
-            # Build command with exclusions for various languages to focus on core
-            # functionality
-            command_parts = [f"{joern_cmd} {source_path} -o {cpg_output_path}"]
+            if language:
+                logger.info(f"Using language hint: {language}")
 
-            # Apply exclusions for languages that support them
-            if (
-                language in self.config.cpg.languages_with_exclusions
-                and self.config.cpg.exclusion_patterns
-            ):
-                # Use exclusion patterns from configuration
-                combined_regex = "|".join(
-                    f"({pattern})" for pattern in self.config.cpg.exclusion_patterns
-                )
-                command_parts.append(f'--exclude-regex "{combined_regex}"')
-
-            command = " ".join(command_parts)
-
-            logger.info(f"Executing CPG generation command: {command}")
+            logger.info(f"Executing: {' '.join(command)}")
 
             # Execute with timeout
             try:
                 result = await asyncio.wait_for(
-                    self._exec_command_async(container, command),
+                    self._exec_command_async(command),
                     timeout=self.config.cpg.generation_timeout,
                 )
 
-                logger.info(f"CPG generation output:\n{result[:2000]}")
+                stdout, stderr = result
 
-                # Known non-fatal warning tokens from Joern
-                non_fatal_tokens = [
-                    "FieldAccessLinkerPass",
-                    "ReachingDefPass",
-                    "The graph has been modified",
-                    "WARN",
-                    "Skipping.",
-                ]
+                logger.info(f"CPG generation output:\n{stdout[:1000]}")
 
-                # If the command produced a non-zero exit, the container.exec_run
-                # wrapper returns the output string; rely on file validation to
-                # determine real success. However, if the output contains fatal
-                # error indicators (like 'ERROR' or 'Exception'), fail fast.
-                if any("ERROR" in result or "Exception" in result for _ in [1]):
-                    # Check whether the 'ERROR' lines look fatal (not just Joern WARN)
-                    if "ERROR:" in result or "Exception" in result:
-                        logger.error(f"CPG generation reported fatal errors:\n{result[:2000]}")
-                        error_msg = "Joern reported fatal errors during CPG generation"
-                        if self.session_manager:
-                            await self.session_manager.update_status(
-                                session_id, SessionStatus.ERROR.value, error_msg
-                            )
-                        raise CPGGenerationError(error_msg)
+                if stderr:
+                    logger.warning(f"CPG generation stderr:\n{stderr[:1000]}")
 
-                # Validate CPG was created on disk; this is the real success check
-                if await self._validate_cpg_async(container, cpg_output_path):
+                # Validate CPG was created
+                if await self._validate_cpg_async(cpg_output_path):
+                    # Start Joern server on the allocated port with the generated CPG
+                    await self._start_joern_server(session_id, cpg_output_path, joern_port)
+                    
+                    # Update session with port and ready status
                     if self.session_manager:
                         await self.session_manager.update_session(
                             session_id,
                             status=SessionStatus.READY.value,
                             cpg_path=cpg_output_path,
+                            joern_port=joern_port,
                         )
-                    logger.info(f"CPG generation completed for session {session_id}")
-                    return cpg_output_path
+                    
+                    # Store in Redis for easy lookup
+                    if self.redis:
+                        await self.redis.set(
+                            f"session:{session_id}:joern_server",
+                            {
+                                "cpg_path": cpg_output_path,
+                                "port": joern_port,
+                                "host": self.config.joern.http_host,
+                            },
+                            ttl=3600
+                        )
+                    
+                    logger.info(
+                        f"CPG generation completed for session {session_id}: {cpg_output_path} "
+                        f"with Joern server on port {joern_port}"
+                    )
+                    return cpg_output_path, joern_port
                 else:
-                    # If file is missing, provide output context but don't choke on
-                    # known warning-only logs
-                    error_msg = "CPG file was not created"
-                    logger.error(f"{error_msg}: {result[:2000]}")
+                    error_msg = "CPG file was not created or is empty"
+                    logger.error(error_msg)
                     if self.session_manager:
                         await self.session_manager.update_status(
                             session_id, SessionStatus.ERROR.value, error_msg
@@ -233,175 +167,133 @@ class CPGGenerator:
             raise
         except Exception as e:
             error_msg = f"CPG generation failed: {str(e)}"
-            logger.error(error_msg)
+            logger.error(error_msg, exc_info=True)
             if self.session_manager:
                 await self.session_manager.update_status(
                     session_id, SessionStatus.ERROR.value, error_msg
                 )
             raise CPGGenerationError(error_msg)
 
-    async def _exec_command_async(self, container, command: str) -> str:
-        """Execute command in container asynchronously"""
+    async def _exec_command_async(
+        self, command: list
+    ) -> tuple[str, str]:
+        """Execute command asynchronously"""
         loop = asyncio.get_event_loop()
 
         def _exec_sync():
-            result = container.exec_run(command, workdir="/workspace")
-            return result.output.decode("utf-8", errors="ignore")
+            try:
+                result = subprocess.run(
+                    command,
+                    capture_output=True,
+                    text=True,
+                    timeout=self.config.cpg.generation_timeout,
+                )
+                return result.stdout, result.stderr
+            except subprocess.TimeoutExpired as e:
+                raise CPGGenerationError(f"Command timed out: {str(e)}")
 
         return await loop.run_in_executor(None, _exec_sync)
 
-    async def _find_joern_executable(self, container, base_command: str) -> str:
-        """Find the full path to a Joern executable in the container"""
-        return f"/opt/joern/joern-cli/{base_command}"
-
-    async def _validate_cpg_async(self, container, cpg_path: str) -> bool:
+    async def _validate_cpg_async(self, cpg_path: str) -> bool:
         """Validate that CPG file was created successfully and is not empty"""
         try:
-            loop = asyncio.get_event_loop()
-
-            def _check_file():
-                # Check if file exists and get size using stat command
-                result = container.exec_run(f"stat {cpg_path}")
-                return result.output.decode("utf-8", errors="ignore").strip()
-
-            stat_result = await loop.run_in_executor(None, _check_file)
-
-            # Check if stat was successful (file exists)
-            if "No such file" in stat_result or "cannot stat" in stat_result:
-                logger.error(f"CPG file not found: {stat_result}")
+            # Check if file exists
+            if not os.path.exists(cpg_path):
+                logger.error(f"CPG file not found: {cpg_path}")
                 return False
 
-            # Extract file size from stat output
-            # stat output format contains "Size: <bytes>" line
-            file_size = await self._extract_file_size_async(container, cpg_path)
+            # Check file size
+            file_size = os.path.getsize(cpg_path)
 
-            if file_size is None:
-                logger.error("Could not determine CPG file size")
-                return False
-
-            # Check if file is too small (empty or nearly empty)
-            # Joern CPGs typically have a minimum size; even small projects generate
-            # CPGs > 1KB
-            min_cpg_size = 1024  # 1KB minimum
+            # Minimum CPG size (1KB)
+            min_cpg_size = 1024
 
             if file_size < min_cpg_size:
                 logger.error(
-                    f"CPG file is too small ({
-                        file_size} bytes), likely empty or corrupted. "
+                    f"CPG file is too small ({file_size} bytes), likely empty. "
                     f"Minimum expected size: {min_cpg_size} bytes"
                 )
                 return False
 
-            logger.info(
-                f"CPG file created successfully: {cpg_path} (size: {file_size} bytes)"
-            )
+            logger.info(f"CPG file validated: {cpg_path} (size: {file_size} bytes)")
             return True
 
         except Exception as e:
-            logger.error(f"CPG validation failed: {e}")
+            logger.error(f"Failed to validate CPG: {e}")
             return False
 
-    async def _extract_file_size_async(self, container, cpg_path: str) -> Optional[int]:
-        """Extract file size from a file in the container"""
+    async def _start_joern_server(self, session_id: str, cpg_path: str, port: int) -> None:
+        """
+        Start a Joern interactive shell server on the specified port with the CPG loaded.
+        
+        Args:
+            session_id: Session identifier
+            cpg_path: Path to the CPG file
+            port: Port to run the Joern server on
+            
+        Raises:
+            CPGGenerationError: If server fails to start
+        """
         try:
-            loop = asyncio.get_event_loop()
-
-            def _get_size():
-                # Use a more reliable method to get file size
-                result = container.exec_run(f"stat -c%s {cpg_path}")
-                return result.output.decode("utf-8", errors="ignore").strip()
-
-            size_str = await loop.run_in_executor(None, _get_size)
-
-            # Try to parse the size
-            try:
-                return int(size_str)
-            except ValueError:
-                # Fallback: try alternative command if stat -c doesn't work
-                logger.debug(
-                    f"stat -c command returned: {size_str}, trying alternative method"
+            logger.info(f"Starting Joern server on port {port} for session {session_id}")
+            
+            # Build Joern server command
+            # Using joern interactive shell with the CPG
+            command = [
+                self.config.joern.binary_path,
+                cpg_path,
+                "--server",
+                f"--listen=0.0.0.0:{port}",
+            ]
+            
+            logger.info(f"Executing: {' '.join(command)}")
+            
+            # Start server process (detached)
+            process = await asyncio.create_subprocess_exec(
+                *command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            
+            # Store process reference
+            self.process_map[session_id] = process
+            
+            # Give server a moment to start
+            await asyncio.sleep(2)
+            
+            # Check if process is still running
+            if process.returncode is not None:
+                _, stderr = await process.communicate()
+                logger.error(f"Joern server failed to start: {stderr.decode()}")
+                raise CPGGenerationError(
+                    f"Joern server on port {port} failed to start"
                 )
-
-                def _get_size_wc():
-                    result = container.exec_run(f"wc -c < {cpg_path}")
-                    return result.output.decode("utf-8", errors="ignore").strip()
-
-                size_str = await loop.run_in_executor(None, _get_size_wc)
-                return int(size_str)
-
+            
+            logger.info(f"Joern server started successfully on port {port}")
+            
         except Exception as e:
-            logger.error(f"Failed to extract file size: {e}")
-            return None
+            logger.error(f"Failed to start Joern server: {e}")
+            raise CPGGenerationError(f"Failed to start Joern server: {str(e)}")
 
-    async def get_container_id(self, session_id: str) -> Optional[str]:
-        """Get container ID for session"""
-        return self.session_containers.get(session_id)
-
-    def register_session_container(self, session_id: str, container_id: str):
-        """Register an externally created container with a session"""
-        self.session_containers[session_id] = container_id
-        logger.info(f"Registered container {container_id} for session {session_id}")
-
-    async def close_session(self, session_id: str):
-        """Close session container"""
-        container_id = self.session_containers.get(session_id)
-        if container_id:
-            try:
-                container = self.docker_client.containers.get(container_id)
-                container.stop()
-                container.remove()
-                logger.info(f"Closed container {container_id} for session {session_id}")
-            except Exception as e:
-                logger.warning(f"Error closing container for session {session_id}: {e}")
-            finally:
-                del self.session_containers[session_id]
-
-    async def cleanup(self):
-        """Cleanup all session containers"""
-        sessions = list(self.session_containers.keys())
-        for session_id in sessions:
-            await self.close_session(session_id)
-
-    async def stream_logs(
-        self, session_id: str, source_path: str, language: str, output_path: str
-    ) -> AsyncIterator[str]:
-        """Generate CPG and stream logs"""
+    async def stop_joern_server(self, session_id: str) -> None:
+        """
+        Stop the Joern server for a session.
+        
+        Args:
+            session_id: Session identifier
+        """
         try:
-            container_id = self.session_containers.get(session_id)
-            if not container_id:
-                yield f"ERROR: No container found for session {session_id}\n"
-                return
-
-            container = self.docker_client.containers.get(container_id)
-
-            # Get the Joern command for the language
-            if language not in self.LANGUAGE_COMMANDS:
-                yield f"ERROR: Unsupported language: {language}\n"
-                return
-
-            base_cmd = self.LANGUAGE_COMMANDS[language]
-            joern_cmd = await self._find_joern_executable(container, base_cmd)
-            command_parts = [f"{joern_cmd} {source_path} -o {output_path}"]
-
-            # Apply exclusions for languages that support them
-            if (
-                language in self.config.cpg.languages_with_exclusions
-                and self.config.cpg.exclusion_patterns
-            ):
-                # Use exclusion patterns from configuration
-                combined_regex = "|".join(
-                    f"({pattern})" for pattern in self.config.cpg.exclusion_patterns
-                )
-                command_parts.append(f'--exclude-regex "{combined_regex}"')
-
-            command = " ".join(command_parts)
-
-            # Execute command and stream output
-            exec_result = container.exec_run(command, stream=True, workdir="/workspace")
-
-            for line in exec_result.output:
-                yield line.decode("utf-8", errors="ignore")
-
+            process = self.process_map.get(session_id)
+            if process and process.returncode is None:
+                logger.info(f"Stopping Joern server for session {session_id}")
+                process.terminate()
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=5)
+                except asyncio.TimeoutError:
+                    logger.warning(f"Joern server for session {session_id} did not stop, killing...")
+                    process.kill()
+                    await process.wait()
+                del self.process_map[session_id]
+                logger.info(f"Joern server for session {session_id} stopped")
         except Exception as e:
-            logger.error(f"Failed to stream logs: {e}")
-            yield f"ERROR: {str(e)}\n"
+            logger.error(f"Error stopping Joern server for {session_id}: {e}")

@@ -29,12 +29,13 @@ class Session:
     """CPG session data model"""
 
     id: str
-    container_id: Optional[str] = None
     source_type: str = ""
     source_path: str = ""
     language: str = ""
     status: str = SessionStatus.INITIALIZING.value
     cpg_path: Optional[str] = None
+    joern_port: Optional[int] = None
+    joern_host: str = "127.0.0.1"
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     last_accessed: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     error_message: Optional[str] = None
@@ -44,12 +45,13 @@ class Session:
         """Convert session to dictionary"""
         return {
             "id": self.id,
-            "container_id": self.container_id,
             "source_type": self.source_type,
             "source_path": self.source_path,
             "language": self.language,
             "status": self.status,
             "cpg_path": self.cpg_path,
+            "joern_port": self.joern_port,
+            "joern_host": self.joern_host,
             "created_at": self.created_at.isoformat(),
             "last_accessed": self.last_accessed.isoformat(),
             "error_message": self.error_message,
@@ -61,12 +63,13 @@ class Session:
         """Create session from dictionary"""
         return cls(
             id=data["id"],
-            container_id=data.get("container_id"),
             source_type=data.get("source_type", ""),
             source_path=data.get("source_path", ""),
             language=data.get("language", ""),
             status=data.get("status", SessionStatus.INITIALIZING.value),
             cpg_path=data.get("cpg_path"),
+            joern_port=data.get("joern_port"),
+            joern_host=data.get("joern_host", "127.0.0.1"),
             created_at=datetime.fromisoformat(data["created_at"]),
             last_accessed=datetime.fromisoformat(data["last_accessed"]),
             error_message=data.get("error_message"),
@@ -100,8 +103,13 @@ class JoernConfig:
     """Joern configuration"""
 
     binary_path: str = "joern"
+    http_host: str = "127.0.0.1"
+    http_port: int = 8080
     memory_limit: str = "4g"
     java_opts: str = "-Xmx4G -Xms2G -XX:+UseG1GC -Dfile.encoding=UTF-8"
+    # Port range for spawning multiple Joern servers (one per CPG)
+    port_range_start: int = 8000
+    port_range_end: int = 9000
 
 
 @dataclass
@@ -111,6 +119,18 @@ class ServerConfig:
     host: str = "0.0.0.0"
     port: int = 4242
     log_level: str = "INFO"
+
+
+@dataclass
+class ContainerConfig:
+    """Single container configuration"""
+
+    name: str = "joern-mcp-server"
+    image: str = "joern-mcp:latest"
+    playground_mount: str = "./playground"
+    redis_port: int = 6379
+    joern_http_port: int = 8080
+    memory_limit: str = "4g"
 
 
 @dataclass
@@ -319,13 +339,18 @@ class QueryConfig:
     timeout: int = 300  # 5 minutes - accounts for large CPG loading time (~2-3 min) + query execution
     cache_enabled: bool = True
     cache_ttl: int = 300  # 5 minutes
+    scripts_dir: str = "/app/queries"
+    temp_dir: str = "/playground/temp"
 
 
 @dataclass
 class StorageConfig:
-    """Storage configuration"""
+    """Storage configuration for playground directories"""
 
-    workspace_root: str = "/tmp/joern-mcp"
+    playground_root: str = "/playground"
+    codebases_dir: str = "/playground/codebases"
+    cpgs_dir: str = "/playground/cpgs"
+    temp_dir: str = "/playground/temp"
     cleanup_on_shutdown: bool = True
 
 
@@ -334,6 +359,7 @@ class Config:
     """Main configuration"""
 
     server: ServerConfig = field(default_factory=ServerConfig)
+    container: ContainerConfig = field(default_factory=ContainerConfig)
     redis: RedisConfig = field(default_factory=RedisConfig)
     joern: JoernConfig = field(default_factory=JoernConfig)
     sessions: SessionConfig = field(default_factory=SessionConfig)

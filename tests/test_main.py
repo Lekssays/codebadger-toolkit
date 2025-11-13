@@ -35,8 +35,6 @@ class TestLifespan:
         ) as mock_git_manager_class, patch(
             "main.CPGGenerator"
         ) as mock_cpg_generator_class, patch(
-            "main.DockerOrchestrator"
-        ) as mock_docker_orch_class, patch(
             "main.QueryExecutor"
         ) as mock_query_executor_class, patch(
             "main.setup_logging"
@@ -62,9 +60,6 @@ class TestLifespan:
             mock_redis_client_class.return_value = mock_redis_client
 
             mock_session_manager = AsyncMock()
-            mock_session_manager.set_docker_cleanup_callback = (
-                MagicMock()
-            )  # Override to be sync
             mock_session_manager_class.return_value = mock_session_manager
 
             mock_git_manager = AsyncMock()
@@ -72,9 +67,6 @@ class TestLifespan:
 
             mock_cpg_generator = AsyncMock()
             mock_cpg_generator_class.return_value = mock_cpg_generator
-
-            mock_docker_orch = AsyncMock()
-            mock_docker_orch_class.return_value = mock_docker_orch
 
             mock_query_executor = AsyncMock()
             mock_query_executor_class.return_value = mock_query_executor
@@ -86,13 +78,11 @@ class TestLifespan:
                 mock_setup_logging.assert_called_with("INFO")
                 mock_makedirs.assert_called()
                 mock_redis_client.connect.assert_called_once()
-                mock_session_manager.set_docker_cleanup_callback.assert_called_once()
                 mock_cpg_generator.initialize.assert_called_once()
                 mock_query_executor.initialize.assert_called_once()
 
             # Verify shutdown calls
             mock_query_executor.cleanup.assert_called_once()
-            mock_docker_orch.cleanup.assert_called_once()
             mock_redis_client.close.assert_called_once()
 
     @pytest.mark.asyncio

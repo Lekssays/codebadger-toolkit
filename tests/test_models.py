@@ -39,7 +39,6 @@ class TestSession:
         assert session.source_path == "https://github.com/user/repo"
         assert session.language == "python"
         assert session.status == SessionStatus.INITIALIZING.value
-        assert session.container_id is None
         assert session.cpg_path is None
         assert isinstance(session.created_at, datetime)
         assert isinstance(session.last_accessed, datetime)
@@ -54,7 +53,6 @@ class TestSession:
             source_path="/path/to/code",
             language="java",
             status="ready",
-            container_id="container-123",
             cpg_path="/path/to/cpg.bin",
             error_message="Test error",
         )
@@ -66,7 +64,6 @@ class TestSession:
         assert data["source_path"] == "/path/to/code"
         assert data["language"] == "java"
         assert data["status"] == "ready"
-        assert data["container_id"] == "container-123"
         assert data["cpg_path"] == "/path/to/cpg.bin"
         assert data["error_message"] == "Test error"
         assert "created_at" in data
@@ -80,7 +77,6 @@ class TestSession:
             "source_path": "https://github.com/user/repo",
             "language": "python",
             "status": "ready",
-            "container_id": "container-123",
             "cpg_path": "/path/to/cpg.bin",
             "created_at": "2023-01-01T12:00:00",
             "last_accessed": "2023-01-01T12:30:00",
@@ -95,7 +91,6 @@ class TestSession:
         assert session.source_path == "https://github.com/user/repo"
         assert session.language == "python"
         assert session.status == "ready"
-        assert session.container_id == "container-123"
         assert session.cpg_path == "/path/to/cpg.bin"
         assert session.error_message is None
         assert session.metadata == {"key": "value"}
@@ -204,9 +199,9 @@ class TestConfigModels:
 
     def test_storage_config(self):
         """Test StorageConfig creation"""
-        config = StorageConfig(workspace_root="/tmp/test", cleanup_on_shutdown=False)
+        config = StorageConfig(playground_root="/playground", cleanup_on_shutdown=False)
 
-        assert config.workspace_root == "/tmp/test"
+        assert config.playground_root == "/playground"
         assert config.cleanup_on_shutdown is False
 
     def test_joern_config(self):
@@ -225,7 +220,7 @@ class TestConfigModels:
             sessions=SessionConfig(ttl=3600),
             cpg=CPGConfig(generation_timeout=600),
             query=QueryConfig(timeout=30),
-            storage=StorageConfig(workspace_root="/tmp/joern"),
+            storage=StorageConfig(playground_root="/playground"),
         )
 
         assert config.server.host == "0.0.0.0"
@@ -234,4 +229,4 @@ class TestConfigModels:
         assert config.sessions.ttl == 3600
         assert config.cpg.generation_timeout == 600
         assert config.query.timeout == 30
-        assert config.storage.workspace_root == "/tmp/joern"
+        assert config.storage.playground_root == "/playground"

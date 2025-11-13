@@ -1,10 +1,10 @@
 """
 Taint Analysis MCP Tools for Joern MCP Server
 Security-focused tools for analyzing data flows and vulnerabilities
+SIMPLIFIED: Returns plain text output from queries
 """
 
 import logging
-import re
 from typing import Any, Dict, Optional
 
 from ..exceptions import (
@@ -49,24 +49,14 @@ def register_taint_analysis_tools(mcp, services: dict):
         Returns:
             {
                 "success": true,
-                "sources": [
-                    {
-                        "node_id": "12345",
-                        "name": "getenv",
-                        "code": "getenv(\"PATH\")",
-                        "filename": "main.c",
-                        "lineNumber": 42,
-                        "method": "main"
-                    }
-                ],
-                "total": 1
+                "output": "Raw query output"
             }
         """
         try:
             validate_session_id(session_id)
 
             session_manager = services["session_manager"]
-            query_executor = services["query_executor"]
+            template_executor = services["template_query_executor"]
 
             session = await session_manager.get_session(session_id)
             if not session:
@@ -99,22 +89,16 @@ def register_taint_analysis_tools(mcp, services: dict):
                     "fopen",
                 ]
 
-            # Build Joern query searching for call names matching any pattern
-            # Remove trailing parens from patterns for proper regex matching
-            cleaned_patterns = [p.rstrip("(") for p in patterns]
-            joined = "|".join([re.escape(p) for p in cleaned_patterns])
-            
-            # Build query with optional file filter
-            if filename:
-                # Use regex to match filename - handles both full and partial matches
-                query = f'cpg.call.name("{joined}").where(_.file.name(".*{filename}.*")).map(c => (c.id, c.name, c.code, c.file.name.headOption.getOrElse("unknown"), c.lineNumber.getOrElse(-1), c.method.fullName)).take({limit})'
-            else:
-                query = f'cpg.call.name("{joined}").map(c => (c.id, c.name, c.code, c.file.name.headOption.getOrElse("unknown"), c.lineNumber.getOrElse(-1), c.method.fullName)).take({limit})'
-
-            result = await query_executor.execute_query(
+            # Use template-based query execution
+            result = await template_executor.execute_template_query(
                 session_id=session_id,
-                cpg_path="/workspace/cpg.bin",
-                query=query,
+                category="taint",
+                template_name="find_sources",
+                params={
+                    "patterns": patterns,
+                    "filename": filename or "",
+                    "limit": limit,
+                },
                 timeout=30,
                 limit=limit,
             )
@@ -125,21 +109,10 @@ def register_taint_analysis_tools(mcp, services: dict):
                     "error": {"code": "QUERY_ERROR", "message": result.error},
                 }
 
-            sources = []
-            for item in result.data:
-                if isinstance(item, dict):
-                    sources.append(
-                        {
-                            "node_id": item.get("_1"),
-                            "name": item.get("_2"),
-                            "code": item.get("_3"),
-                            "filename": item.get("_4"),
-                            "lineNumber": item.get("_5"),
-                            "method": item.get("_6"),
-                        }
-                    )
+            # Return raw output
+            output = result.data[0].get("output", "") if result.data else ""
 
-            return {"success": True, "sources": sources, "total": len(sources)}
+            return {"success": True, "output": output}
 
         except (SessionNotFoundError, SessionNotReadyError, ValidationError) as e:
             logger.error(f"Error finding taint sources: {e}")
@@ -182,24 +155,14 @@ def register_taint_analysis_tools(mcp, services: dict):
         Returns:
             {
                 "success": true,
-                "sinks": [
-                    {
-                        "node_id": "67890",
-                        "name": "system",
-                        "code": "system(cmd)",
-                        "filename": "main.c",
-                        "lineNumber": 100,
-                        "method": "execute_command"
-                    }
-                ],
-                "total": 1
+                "output": "Raw query output"
             }
         """
         try:
             validate_session_id(session_id)
 
             session_manager = services["session_manager"]
-            query_executor = services["query_executor"]
+            template_executor = services["template_query_executor"]
 
             session = await session_manager.get_session(session_id)
             if not session:
@@ -222,21 +185,16 @@ def register_taint_analysis_tools(mcp, services: dict):
             if not patterns:
                 patterns = ["system", "popen", "execl", "execv", "sprintf", "fprintf"]
 
-            # Remove trailing parens from patterns for proper regex matching
-            cleaned_patterns = [p.rstrip("(") for p in patterns]
-            joined = "|".join([re.escape(p) for p in cleaned_patterns])
-            
-            # Build query with optional file filter
-            if filename:
-                # Use regex to match filename - handles both full and partial matches
-                query = f'cpg.call.name("{joined}").where(_.file.name(".*{filename}.*")).map(c => (c.id, c.name, c.code, c.file.name.headOption.getOrElse("unknown"), c.lineNumber.getOrElse(-1), c.method.fullName)).take({limit})'
-            else:
-                query = f'cpg.call.name("{joined}").map(c => (c.id, c.name, c.code, c.file.name.headOption.getOrElse("unknown"), c.lineNumber.getOrElse(-1), c.method.fullName)).take({limit})'
-
-            result = await query_executor.execute_query(
+            # Use template-based query execution
+            result = await template_executor.execute_template_query(
                 session_id=session_id,
-                cpg_path="/workspace/cpg.bin",
-                query=query,
+                category="taint",
+                template_name="find_sinks",
+                params={
+                    "patterns": patterns,
+                    "filename": filename or "",
+                    "limit": limit,
+                },
                 timeout=30,
                 limit=limit,
             )
@@ -247,21 +205,10 @@ def register_taint_analysis_tools(mcp, services: dict):
                     "error": {"code": "QUERY_ERROR", "message": result.error},
                 }
 
-            sinks = []
-            for item in result.data:
-                if isinstance(item, dict):
-                    sinks.append(
-                        {
-                            "node_id": item.get("_1"),
-                            "name": item.get("_2"),
-                            "code": item.get("_3"),
-                            "filename": item.get("_4"),
-                            "lineNumber": item.get("_5"),
-                            "method": item.get("_6"),
-                        }
-                    )
+            # Return raw output
+            output = result.data[0].get("output", "") if result.data else ""
 
-            return {"success": True, "sinks": sinks, "total": len(sinks)}
+            return {"success": True, "output": output}
 
         except (SessionNotFoundError, SessionNotReadyError, ValidationError) as e:
             logger.error(f"Error finding taint sinks: {e}")
@@ -471,8 +418,7 @@ def register_taint_analysis_tools(mcp, services: dict):
                         raise ValidationError(
                             f"{node_type}_node_id must be a valid integer: {node_id}"
                         )
-                    query = f'cpg.call.id({
-                        node_id_long}L).map(c => (c.id, c.code, c.file.name.headOption.getOrElse("unknown"), c.lineNumber.getOrElse(-1), c.method.fullName)).take(1).l'
+                    query = f'cpg.call.id({node_id_long}L).map(c => (c.id, c.code, c.file.name.headOption.getOrElse("unknown"), c.lineNumber.getOrElse(-1), c.method.fullName)).take(1).l'
                 else:
                     parts = location.split(":")
                     if len(parts) < 2:
@@ -489,11 +435,9 @@ def register_taint_analysis_tools(mcp, services: dict):
                     method_name = parts[2] if len(parts) > 2 else None
 
                     if method_name:
-                        query = f'cpg.call.where(_.file.name(".*{filename}$")).lineNumber({line_num}).filter(_.method.fullName.contains("{
-                            method_name}")).map(c => (c.id, c.code, c.file.name.headOption.getOrElse("unknown"), c.lineNumber.getOrElse(-1), c.method.fullName)).take(1).l'
+                        query = f'cpg.call.where(_.file.name(".*{filename}$")).lineNumber({line_num}).filter(_.method.fullName.contains("{method_name}")).map(c => (c.id, c.code, c.file.name.headOption.getOrElse("unknown"), c.lineNumber.getOrElse(-1), c.method.fullName)).take(1).l'
                     else:
-                        query = f'cpg.call.where(_.file.name(".*{filename}$")).lineNumber({
-                            line_num}).map(c => (c.id, c.code, c.file.name.headOption.getOrElse("unknown"), c.lineNumber.getOrElse(-1), c.method.fullName)).take(1).l'
+                        query = f'cpg.call.where(_.file.name(".*{filename}$")).lineNumber({line_num}).map(c => (c.id, c.code, c.file.name.headOption.getOrElse("unknown"), c.lineNumber.getOrElse(-1), c.method.fullName)).take(1).l'
 
                 result = await query_executor.execute_query(
                     session_id=session_id,
@@ -541,7 +485,7 @@ def register_taint_analysis_tools(mcp, services: dict):
 
             # Build dataflow query to find paths from source to sink
             source_id = source_info["node_id"]
-            
+
             if has_sink:
                 # Specific sink mode: find flows between source and sink
                 sink_id = sink_info["node_id"]
@@ -594,19 +538,18 @@ def register_taint_analysis_tools(mcp, services: dict):
                   val flows = if (source.nonEmpty) {{
                     val sourceCall = source.get
                     val assignments = sourceCall.inAssignment.l
-                    
+
                     if (assignments.nonEmpty) {{
                       val assign = assignments.head
                       val targetVar = assign.target.code
-                      
+
                       // Find all dangerous sinks that use this variable
                       val dangerousSinks = Set("system", "popen", "execl", "execv", "sprintf", "fprintf", "free", "delete")
-                      val sinkPattern = dangerousSinks.mkString("|")
-                      val sinkCalls = cpg.call.name(sinkPattern).filter(sink => {{
+                      val sinkCalls = cpg.call.name(dangerousSinks).filter(sink => {{
                         val sinkArgs = sink.argument.code.l
                         sinkArgs.contains(targetVar)
                       }}).l.take(20)  // Limit results
-                      
+
                       sinkCalls.map(sink => Map(
                         "_1" -> 0,  // flow_idx
                         "_2" -> 3,  // path_length
@@ -728,7 +671,7 @@ def register_taint_analysis_tools(mcp, services: dict):
             validate_session_id(session_id)
 
             session_manager = services["session_manager"]
-            query_executor = services["query_executor"]
+            template_executor = services["template_query_executor"]
 
             session = await session_manager.get_session(session_id)
             if not session:
@@ -739,49 +682,15 @@ def register_taint_analysis_tools(mcp, services: dict):
 
             await session_manager.touch_session(session_id)
 
-            # Escape patterns for regex
-            source_escaped = re.escape(source_method)
-            target_escaped = re.escape(target_method)
-
-            # Query to check reachability using depth-independent BFS traversal.
-            # Instead of manually checking levels 1-5, we use a recursive function
-            # to traverse the entire call graph regardless of depth.
-            query = (
-                f'val source = cpg.method.name("{source_escaped}").l\n'
-                f'val target = cpg.method.name("{target_escaped}").l\n'
-                f"val reachable = if (source.nonEmpty && target.nonEmpty) {{\n"
-                f"  val targetName = target.head.name\n"
-                f"  // BFS traversal of call graph using recursive method traversal\n"
-                f"  var visited = Set[String]()\n"
-                f"  var toVisit = scala.collection.mutable.Queue[io.shiftleft.codepropertygraph.generated.nodes.Method]()\n"
-                f"  toVisit.enqueue(source.head)\n"
-                f"  var found = false\n"
-                f"  \n"
-                f"  while (toVisit.nonEmpty && !found) {{\n"
-                f"    val current = toVisit.dequeue()\n"
-                f"    val currentName = current.name\n"
-                f"    if (!visited.contains(currentName)) {{\n"
-                f"      visited = visited + currentName\n"
-                f"      val callees = current.call.callee.l\n"
-                f"      for (callee <- callees) {{\n"
-                f"        val calleeName = callee.name\n"
-                f"        if (calleeName == targetName) {{\n"
-                f"          found = true\n"
-                f'        }} else if (!visited.contains(calleeName) && !calleeName.startsWith("<operator>")) {{\n'
-                f"          toVisit.enqueue(callee)\n"
-                f"        }}\n"
-                f"      }}\n"
-                f"    }}\n"
-                f"  }}\n"
-                f"  found\n"
-                f"}} else false\n"
-                f"List(reachable).toJsonPretty"
-            )
-
-            result = await query_executor.execute_query(
+            # Use template-based query execution
+            result = await template_executor.execute_template_query(
                 session_id=session_id,
-                cpg_path="/workspace/cpg.bin",
-                query=query,
+                category="taint",
+                template_name="check_reachability",
+                params={
+                    "source_method": source_method,
+                    "target_method": target_method,
+                },
                 timeout=60,
                 limit=1,
             )
@@ -916,7 +825,7 @@ def register_taint_analysis_tools(mcp, services: dict):
             filename = None
             line_num = None
             call_name = None
-            
+
             if location:
                 parts = location.split(":")
                 if len(parts) < 2:
@@ -956,7 +865,7 @@ val targetCallOpt = if (useNodeId) {
     .ast.isCall
     .lineNumber(targetLine)
     .l
-  
+
   if (targetCallName.nonEmpty) {
     candidateCalls.name(targetCallName).headOption
   } else {
@@ -973,62 +882,62 @@ val resultJson = targetCallOpt match {
     val callLineNumber = call.lineNumber.getOrElse(-1)
     val callMethod = escapeJson(call.method.name)
     val callArguments = call.argument.code.l
-    
+
     val argsJson = callArguments.map(arg => "\"" + escapeJson(arg) + "\"").mkString(",")
     val targetCallJson = "{\"node_id\":\"" + callNodeId + "\",\"name\":\"" + callName + "\",\"code\":\"" + callCode + "\",\"filename\":\"" + callFilename + "\",\"lineNumber\":" + callLineNumber + ",\"method\":\"" + callMethod + "\",\"arguments\":[" + argsJson + "]}"
-    
+
     // Step 2: Collect dataflow dependencies
     val dataflowList = scala.collection.mutable.ListBuffer[String]()
-    
+
     if (includeDataflow) {
       callArguments.foreach { arg =>
         val cleanArg = arg.trim().replaceAll("\"", "")
-        
-        if (cleanArg.nonEmpty && 
-            !cleanArg.matches("\\d+") && 
-            !cleanArg.startsWith("(") && 
+
+        if (cleanArg.nonEmpty &&
+            !cleanArg.matches("\\d+") &&
+            !cleanArg.startsWith("(") &&
             !cleanArg.startsWith("0x")) {
-          
+
           val identifiers = cpg.identifier.name(cleanArg).l.take(10)
-          
+
           identifiers.foreach { id =>
             val idCode = escapeJson(id.code)
             val idFilename = escapeJson(id.file.name.headOption.getOrElse("unknown"))
             val idLineNumber = id.lineNumber.getOrElse(-1)
             val idMethod = escapeJson(id.method.name)
-            
+
             val dataflowJson = "{\"variable\":\"" + cleanArg + "\",\"code\":\"" + idCode + "\",\"filename\":\"" + idFilename + "\",\"lineNumber\":" + idLineNumber + ",\"method\":\"" + idMethod + "\"}"
             dataflowList += dataflowJson
           }
         }
       }
     }
-    
+
     val dataflowJson = dataflowList.take(20).mkString(",")
-    
+
     // Step 3: Collect control dependencies
     val controlDepsList = scala.collection.mutable.ListBuffer[String]()
-    
+
     if (includeControlFlow) {
       val controlDeps = call.controlledBy.dedup.take(20).l
-      
+
       controlDeps.foreach { ctrl =>
         val ctrlCode = escapeJson(ctrl.code)
         val ctrlFilename = escapeJson(ctrl.file.name.headOption.getOrElse("unknown"))
         val ctrlLineNumber = ctrl.lineNumber.getOrElse(-1)
         val ctrlMethod = escapeJson(ctrl.method.name)
-        
+
         val controlJson = "{\"code\":\"" + ctrlCode + "\",\"filename\":\"" + ctrlFilename + "\",\"lineNumber\":" + ctrlLineNumber + ",\"method\":\"" + ctrlMethod + "\"}"
         controlDepsList += controlJson
       }
     }
-    
+
     val controlDepsJson = controlDepsList.mkString(",")
-    
+
     val totalNodes = 1 + dataflowList.size + controlDepsList.size
-    
+
     "{\"success\":true,\"slice\":{\"target_call\":" + targetCallJson + ",\"dataflow\":[" + dataflowJson + "],\"control_dependencies\":[" + controlDepsJson + "]},\"total_nodes\":" + totalNodes + "}"
-    
+
   case None =>
     val errorMsg = if (useNodeId) {
       s"Call not found: node_id=$targetNodeId, location=null"
@@ -1073,17 +982,13 @@ resultJson
                     "error": {"code": "QUERY_ERROR", "message": result.error},
                 }
 
-            # Parse the JSON result (same as get_data_dependencies)
-            import json
-
+            # Return the raw output from query
             if isinstance(result.data, list) and len(result.data) > 0:
-                result_data = result.data[0]
-
-                # Handle JSON string response
-                if isinstance(result_data, str):
-                    return json.loads(result_data)
-                else:
-                    return result_data
+                output = result.data[0].get("output", "") if isinstance(result.data[0], dict) else str(result.data[0])
+                return {
+                    "success": True,
+                    "output": output,
+                }
             else:
                 return {
                     "success": False,
@@ -1207,7 +1112,7 @@ resultJson
         try:
             validate_session_id(session_id)
             session_manager = services["session_manager"]
-            query_executor = services["query_executor"]
+            template_executor = services["template_query_executor"]
 
             session = await session_manager.get_session(session_id)
             if not session:
@@ -1216,39 +1121,17 @@ resultJson
                 raise SessionNotReadyError(f"Session is in '{session.status}' status")
             await session_manager.touch_session(session_id)
 
-            # Single-line CPGQL query for argument-matching flows
-            query = (
-                f'cpg.call.name("{source_name}").flatMap(src => {{'
-                f'  val argExpr = src.argument.l.lift({
-                    arg_index}).map(_.code).getOrElse("<no-arg>"); '
-                f'  cpg.call.name("{sink_name}").filter(sink => '
-                f"    sink.argument.l.size > {
-                    arg_index} && sink.argument.l({arg_index}).code == argExpr"
-                f"  ).map(sink => Map("
-                f'    "source" -> Map('
-                f'      "name" -> src.name, '
-                f'      "filename" -> src.file.name.headOption.getOrElse("unknown"), '
-                f'      "lineNumber" -> src.lineNumber.getOrElse(-1), '
-                f'      "code" -> src.code, '
-                f'      "method" -> src.methodFullName, '
-                f'      "matched_arg" -> argExpr'
-                f"    ), "
-                f'    "sink" -> Map('
-                f'      "name" -> sink.name, '
-                f'      "filename" -> sink.file.name.headOption.getOrElse("unknown"), '
-                f'      "lineNumber" -> sink.lineNumber.getOrElse(-1), '
-                f'      "code" -> sink.code, '
-                f'      "method" -> sink.methodFullName, '
-                f'      "matched_arg" -> argExpr'
-                f"    )"
-                f"  ))"
-                f"}}).toJsonPretty"
-            )
-
-            result = await query_executor.execute_query(
+            # Use template-based query execution
+            result = await template_executor.execute_template_query(
                 session_id=session_id,
-                cpg_path="/workspace/cpg.bin",
-                query=query,
+                category="taint",
+                template_name="find_argument_flows",
+                params={
+                    "source_name": source_name,
+                    "sink_name": sink_name,
+                    "arg_index": arg_index,
+                    "limit": limit,
+                },
                 timeout=60,
                 limit=limit,
             )
@@ -1404,13 +1287,13 @@ val targetMethodOpt = cpg.method.filter(m => {
 targetMethodOpt match {
   case Some(method) =>
     val dependencies = scala.collection.mutable.ListBuffer[String]()
-    
+
     if (direction == "backward") {
       val inits = method.local.name(varName).map { local =>
         "{\"line\":" + local.lineNumber.getOrElse(-1) + ",\"code\":\"" + escapeJson(local.typeFullName + " " + local.code) + "\",\"type\":\"initialization\",\"filename\":\"" + escapeJson(local.file.name.headOption.getOrElse("unknown")) + "\"}"
       }.l
       dependencies ++= inits
-      
+
       val assignments = method.assignment.l.filter(assign => {
         val line = assign.lineNumber.getOrElse(-1)
         if (line >= targetLine) false
@@ -1422,7 +1305,7 @@ targetMethodOpt match {
         "{\"line\":" + assign.lineNumber.getOrElse(-1) + ",\"code\":\"" + escapeJson(assign.code) + "\",\"type\":\"assignment\",\"filename\":\"" + escapeJson(assign.file.name.headOption.getOrElse("unknown")) + "\"}"
       }
       dependencies ++= assignments
-      
+
       val modifications = method.call.name("<operator>.(postIncrement|preIncrement|postDecrement|preDecrement|assignmentPlus|assignmentMinus)").l.filter { call =>
         val line = call.lineNumber.getOrElse(-1)
         if (line >= targetLine) false
@@ -1434,7 +1317,7 @@ targetMethodOpt match {
         "{\"line\":" + call.lineNumber.getOrElse(-1) + ",\"code\":\"" + escapeJson(call.code) + "\",\"type\":\"modification\",\"filename\":\"" + escapeJson(call.file.name.headOption.getOrElse("unknown")) + "\"}"
       }
       dependencies ++= modifications
-      
+
       val callModifications = method.call.l.filter { call =>
         val line = call.lineNumber.getOrElse(-1)
         if (line >= targetLine) false
@@ -1446,7 +1329,7 @@ targetMethodOpt match {
         "{\"line\":" + call.lineNumber.getOrElse(-1) + ",\"code\":\"" + escapeJson(call.code) + "\",\"type\":\"function_call\",\"filename\":\"" + escapeJson(call.file.name.headOption.getOrElse("unknown")) + "\"}"
       }
       dependencies ++= callModifications
-      
+
     } else if (direction == "forward") {
       val usages = method.call.l.filter { call =>
         val line = call.lineNumber.getOrElse(-1)
@@ -1459,7 +1342,7 @@ targetMethodOpt match {
         "{\"line\":" + call.lineNumber.getOrElse(-1) + ",\"code\":\"" + escapeJson(call.code) + "\",\"type\":\"usage\",\"filename\":\"" + escapeJson(call.file.name.headOption.getOrElse("unknown")) + "\"}"
       }
       dependencies ++= usages
-      
+
       val assignmentsFrom = method.assignment.l.filter { assign =>
         val line = assign.lineNumber.getOrElse(-1)
         if (line <= targetLine) false
@@ -1472,16 +1355,16 @@ targetMethodOpt match {
       }
       dependencies ++= assignmentsFrom
     }
-    
+
     val sortedDeps = dependencies.sortBy(dep => {
       val linePattern = "\"line\":(\\d+)".r
       linePattern.findFirstMatchIn(dep).map(_.group(1).toInt).getOrElse(-1)
     })
-    
+
     val depsJson = sortedDeps.mkString(",")
-    
+
     "{\"success\":true,\"target\":{\"file\":\"" + escapeJson(method.filename) + "\",\"line\":" + targetLine + ",\"variable\":\"" + varName + "\",\"method\":\"" + escapeJson(method.name) + "\"},\"direction\":\"" + direction + "\",\"dependencies\":[" + depsJson + "],\"total\":" + sortedDeps.size + "}"
-    
+
   case None =>
     "{\"success\":false,\"error\":{\"code\":\"NOT_FOUND\",\"message\":\"No method found containing line LINE_NUM_PLACEHOLDER in file FILENAME_PLACEHOLDER\"}}"
 }
@@ -1508,17 +1391,13 @@ targetMethodOpt match {
                     "error": {"code": "QUERY_ERROR", "message": result.error},
                 }
 
-            # Parse the JSON result (same as find_bounds_checks)
-            import json
-
+            # Return the raw output from query
             if isinstance(result.data, list) and len(result.data) > 0:
-                result_data = result.data[0]
-
-                # Handle JSON string response
-                if isinstance(result_data, str):
-                    return json.loads(result_data)
-                else:
-                    return result_data
+                output = result.data[0].get("output", "") if isinstance(result.data[0], dict) else str(result.data[0])
+                return {
+                    "success": True,
+                    "output": output,
+                }
             else:
                 return {
                     "success": False,

@@ -18,10 +18,10 @@ from src.services import (
     SessionManager,
     GitManager,
     CPGGenerator,
-    QueryExecutor,
-    DockerOrchestrator
+    QueryExecutor
 )
 from src.utils import RedisClient, setup_logging
+from src.utils.template_query_executor import TemplateQueryExecutor
 from src.tools import register_tools
 
 # Version information - bump this when releasing new versions
@@ -56,18 +56,9 @@ async def lifespan(mcp: FastMCP):
         # Initialize services
         services['config'] = config
         services['redis'] = redis_client
-        services['session_manager'] = SessionManager(redis_client, config.sessions)
+        services['session_manager'] = SessionManager(redis_client, config.sessions, config.joern)
         services['git_manager'] = GitManager(config.storage.workspace_root)
-        services['cpg_generator'] = CPGGenerator(config, services['session_manager'])
-        
-        # Initialize Docker orchestrator
-        services['docker'] = DockerOrchestrator()
-        await services['docker'].initialize()
-        
-        # Set up Docker cleanup callback for session manager
-        services['session_manager'].set_docker_cleanup_callback(
-            services['docker'].stop_container
-        )
+        services['cpg_generator'] = CPGGenerator(config, services['session_manager'], redis_client)
         
         # Initialize CPG generator
         await services['cpg_generator'].initialize()
@@ -80,8 +71,13 @@ async def lifespan(mcp: FastMCP):
             services['cpg_generator']
         )
         
-        # Initialize query executor
+        # Initialize query executor (HTTP client for Joern)
         await services['query_executor'].initialize()
+        
+        # Initialize template query executor
+        services['template_query_executor'] = TemplateQueryExecutor(
+            services['query_executor']
+        )
         
         logger.info("All services initialized")
         logger.info("joern-mcp Server is ready")
@@ -93,9 +89,6 @@ async def lifespan(mcp: FastMCP):
         
         # Cleanup query executor sessions
         await services['query_executor'].cleanup()
-        
-        # Cleanup Docker containers
-        await services['docker'].cleanup()
         
         # Close connections
         await redis_client.close()

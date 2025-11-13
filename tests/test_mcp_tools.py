@@ -109,7 +109,6 @@ def ready_session():
     session_id = str(uuid.uuid4())
     return Session(
         id=session_id,
-        container_id="container123",
         source_type="local",
         source_path="/tmp/test",
         language="c",

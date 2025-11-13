@@ -64,7 +64,7 @@ class TestLoadConfig:
             "QUERY_TIMEOUT": "60",
             "QUERY_CACHE_ENABLED": "false",
             "QUERY_CACHE_TTL": "600",
-            "WORKSPACE_ROOT": "/tmp/custom",
+            "PLAYGROUND_ROOT": "/playground/custom",
             "CLEANUP_ON_SHUTDOWN": "false",
         }
 
@@ -88,7 +88,7 @@ class TestLoadConfig:
             assert config.query.timeout == 60
             assert config.query.cache_enabled is False
             assert config.query.cache_ttl == 600
-            assert config.storage.workspace_root == "/tmp/custom"
+            assert config.storage.playground_root == "/playground/custom"
             assert config.storage.cleanup_on_shutdown is False
 
     def test_load_config_defaults(self):
@@ -100,7 +100,7 @@ class TestLoadConfig:
             assert config.server.host == "0.0.0.0"
             assert config.server.port == 4242
             assert config.server.log_level == "INFO"
-            assert config.redis.host == "localhost"
+            assert config.redis.host == "127.0.0.1"
             assert config.redis.port == 6379
             assert config.redis.password is None
             assert config.redis.db == 0
@@ -114,7 +114,7 @@ class TestLoadConfig:
             assert config.query.timeout == 30
             assert config.query.cache_enabled is True
             assert config.query.cache_ttl == 300
-            assert config.storage.workspace_root == "/tmp/joern-mcp"
+            assert config.storage.playground_root == "/playground"
             assert config.storage.cleanup_on_shutdown is True
 
     def test_load_config_file_not_found(self):
@@ -189,7 +189,7 @@ class TestDictToConfig:
             "sessions": {"ttl": 7200, "idle_timeout": 3600, "max_concurrent": 20},
             "cpg": {"generation_timeout": 1200, "max_repo_size_mb": 1000},
             "query": {"timeout": 60, "cache_enabled": False, "cache_ttl": 600},
-            "storage": {"workspace_root": "/tmp/custom", "cleanup_on_shutdown": False},
+            "storage": {"playground_root": "/playground/custom", "cleanup_on_shutdown": False},
         }
 
         config = _dict_to_config(data)
@@ -211,7 +211,7 @@ class TestDictToConfig:
         assert config.query.timeout == 60
         assert config.query.cache_enabled is False
         assert config.query.cache_ttl == 600
-        assert config.storage.workspace_root == "/tmp/custom"
+        assert config.storage.playground_root == "/playground/custom"
         assert config.storage.cleanup_on_shutdown is False
 
     def test_dict_to_config_partial(self):

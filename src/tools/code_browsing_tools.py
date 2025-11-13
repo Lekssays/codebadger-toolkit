@@ -1,11 +1,12 @@
 """
-Code Browsing MCP Tools for Joern MCP Server
-Tools for exploring and navigating codebase structure
+Code Browsing MCP Tools for Joern MCP Server (SIMPLIFIED)
+
+Tools for exploring and navigating codebase structure using query templates.
+Returns plain text output instead of parsing JSON tuples.
 """
 
 import logging
 import os
-import re
 from typing import Any, Dict, Optional
 
 from ..exceptions import (
@@ -19,9 +20,19 @@ from ..utils.validators import validate_session_id
 logger = logging.getLogger(__name__)
 
 
+def _extract_output(result_data: Any) -> str:
+    """Extract plain text output from query result"""
+    if isinstance(result_data, list) and len(result_data) > 0:
+        first_item = result_data[0]
+        if isinstance(first_item, dict):
+            return first_item.get("output", "")
+        else:
+            return str(first_item)
+    return ""
+
+
 def register_code_browsing_tools(mcp, services: dict):
     """Register code browsing MCP tools with the FastMCP server"""
-
 
     @mcp.tool()
     async def list_methods(
@@ -44,9 +55,8 @@ def register_code_browsing_tools(mcp, services: dict):
             name_pattern: Optional regex to filter method names (e.g., ".*authenticate.*")
             file_pattern: Optional regex to filter by file path
             callee_pattern: Optional regex to filter for methods that call a specific function
-                (e.g., "memcpy|free|malloc")
             include_external: Include external/library methods (default: false)
-            limit: Maximum number of results to return. This can be overridden. Default is 100.
+            limit: Maximum number of results to return (default: 100)
 
         Returns:
             {
@@ -55,6 +65,11 @@ def register_code_browsing_tools(mcp, services: dict):
                     {
                         "node_id": "12345",
                         "name": "main",
+                        "fullName": "main",
+                        "signature": "int main()",
+                        "filename": "main.c",
+                        "lineNumber": 10,
+                        "isExternal": false
                     }
                 ],
                 "total": 1
@@ -64,7 +79,7 @@ def register_code_browsing_tools(mcp, services: dict):
             validate_session_id(session_id)
 
             session_manager = services["session_manager"]
-            query_executor = services["query_executor"]
+            template_executor = services["template_query_executor"]
 
             session = await session_manager.get_session(session_id)
             if not session:
@@ -75,33 +90,18 @@ def register_code_browsing_tools(mcp, services: dict):
 
             await session_manager.touch_session(session_id)
 
-            # Build query with filters
-            query_parts = ["cpg.method"]
-
-            if not include_external:
-                query_parts.append(".isExternal(false)")
-
-            if name_pattern:
-                query_parts.append(f'.name("{name_pattern}")')
-
-            if file_pattern:
-                query_parts.append(f'.where(_.file.name("{file_pattern}"))')
-
-            if callee_pattern:
-                query_parts.append(f'.where(_.callOut.name("{callee_pattern}"))')
-
-            query_parts.append(
-                ".map(m => (m.name, m.id, m.fullName, m.signature, m.filename, m.lineNumber.getOrElse(-1), m.isExternal))"
-            )
-
-            query = "".join(query_parts) + f".dedup.take({limit}).l"
-
-            logger.info(f"list_methods query: {query}")
-
-            result = await query_executor.execute_query(
+            # Execute template query
+            result = await template_executor.execute_template_query(
                 session_id=session_id,
-                cpg_path="/workspace/cpg.bin",
-                query=query,
+                category="core",
+                template_name="list_methods",
+                params={
+                    "include_external": include_external,
+                    "name_pattern": name_pattern or "",
+                    "file_pattern": file_pattern or "",
+                    "callee_pattern": callee_pattern or "",
+                    "limit": limit,
+                },
                 timeout=30,
                 limit=limit,
             )
@@ -112,25 +112,10 @@ def register_code_browsing_tools(mcp, services: dict):
                     "error": {"code": "QUERY_ERROR", "message": result.error},
                 }
 
-            methods = []
-            logger.info(f"Raw result data: {result.data[:3]}")  # Debug logging
-            for item in result.data:
-                # Map tuple fields: _1=id, _2=name, _3=fullName, _4=signature,
-                # _5=filename, _6=lineNumber, _7=isExternal
-                if isinstance(item, dict):
-                    methods.append(
-                        {
-                            "node_id": str(item.get("_1", "")),
-                            "name": item.get("_2", ""),
-                            "fullName": item.get("_3", ""),
-                            "signature": item.get("_4", ""),
-                            "filename": item.get("_5", ""),
-                            "lineNumber": item.get("_6", -1),
-                            "isExternal": item.get("_7", False),
-                        }
-                    )
+            # Return raw output
+            output = result.data[0].get("output", "") if result.data and isinstance(result.data[0], dict) else ""
 
-            return {"success": True, "methods": methods, "total": len(methods)}
+            return {"success": True, "output": output}
 
         except (SessionNotFoundError, SessionNotReadyError, ValidationError) as e:
             logger.error(f"Error listing methods: {e}")
@@ -169,7 +154,7 @@ def register_code_browsing_tools(mcp, services: dict):
                         "filename": "main.c",
                         "lineNumber": 10,
                         "lineNumberEnd": 20,
-                        "code": "int main() {\n    printf(\"Hello\");\n    return 0;\n}"
+                        "code": "int main() { ... }"
                     }
                 ],
                 "total": 1
@@ -179,7 +164,7 @@ def register_code_browsing_tools(mcp, services: dict):
             validate_session_id(session_id)
 
             session_manager = services["session_manager"]
-            query_executor = services["query_executor"]
+            template_executor = services["template_query_executor"]
 
             session = await session_manager.get_session(session_id)
             if not session:
@@ -190,21 +175,15 @@ def register_code_browsing_tools(mcp, services: dict):
 
             await session_manager.touch_session(session_id)
 
-            # Build query to get method metadata
-            query_parts = [f'cpg.method.name("{method_name}")']
-
-            if filename:
-                query_parts.append(f'.filename(".*{filename}.*")')
-
-            query_parts.append(
-                ".map(m => (m.name, m.filename, m.lineNumber.getOrElse(-1), m.lineNumberEnd.getOrElse(-1)))"
-            )
-            query = "".join(query_parts) + ".toJsonPretty"
-
-            result = await query_executor.execute_query(
+            # Execute template query to get method metadata
+            result = await template_executor.execute_template_query(
                 session_id=session_id,
-                cpg_path="/workspace/cpg.bin",
-                query=query,
+                category="core",
+                template_name="get_method_source",
+                params={
+                    "method_name": method_name,
+                    "filename": filename or "",
+                },
                 timeout=30,
                 limit=10,
             )
@@ -215,87 +194,9 @@ def register_code_browsing_tools(mcp, services: dict):
                     "error": {"code": "QUERY_ERROR", "message": result.error},
                 }
 
-            methods = []
-            method_name_result = ""
-            method_filename = ""
-            line_number = -1
-            line_number_end = -1
+            output = _extract_output(result.data)
 
-            for item in result.data:
-                if isinstance(item, dict):
-                    method_name_result = item.get("_1", "")
-                    method_filename = item.get("_2", "")
-                    line_number = item.get("_3", -1)
-                    line_number_end = item.get("_4", -1)
-
-            # Get the full source code using file reading logic
-            if method_filename and line_number > 0 and line_number_end > 0:
-                try:
-                    # Get playground path
-                    playground_path = os.path.abspath(
-                        os.path.join(
-                            os.path.dirname(__file__), "..", "..", "playground"
-                        )
-                    )
-
-                    # Get source directory from session
-                    if session.source_type == "github":
-                        # For GitHub repos, use the cached directory
-                        from .core_tools import get_cpg_cache_key
-                        cpg_cache_key = get_cpg_cache_key(
-                            session.source_type, session.source_path, session.language
-                        )
-                        source_dir = os.path.join(
-                            playground_path, "codebases", cpg_cache_key
-                        )
-                    else:
-                        # For local paths, use the session source path directly
-                        source_path = session.source_path
-                        if not os.path.isabs(source_path):
-                            source_path = os.path.abspath(source_path)
-                        source_dir = source_path
-
-                    # Construct full file path
-                    file_path = os.path.join(source_dir, method_filename)
-
-                    # Check if file exists and read it
-                    if os.path.exists(file_path) and os.path.isfile(file_path):
-                        with open(
-                            file_path, "r", encoding="utf-8", errors="replace"
-                        ) as f:
-                            lines = f.readlines()
-
-                        # Validate line numbers
-                        total_lines = len(lines)
-                        if (
-                            line_number <= total_lines
-                            and line_number_end >= line_number
-                        ):
-                            # Extract the code snippet (lines are 0-indexed in the list)
-                            actual_end_line = min(line_number_end, total_lines)
-                            code_lines = lines[line_number - 1: actual_end_line]
-                            full_code = "".join(code_lines)
-                        else:
-                            full_code = f"// Invalid line range: {line_number}-{
-                                line_number_end}, file has {total_lines} lines"
-                    else:
-                        full_code = f"// Source file not found: {method_filename}"
-                except Exception as e:
-                    full_code = f"// Error reading source file: {str(e)}"
-            else:
-                full_code = "// Unable to determine line range for method"
-
-            methods.append(
-                {
-                    "name": method_name_result,
-                    "filename": method_filename,
-                    "lineNumber": line_number,
-                    "lineNumberEnd": line_number_end,
-                    "code": full_code,
-                }
-            )
-
-            return {"success": True, "methods": methods, "total": len(methods)}
+            return {"success": True, "output": output}
 
         except (SessionNotFoundError, SessionNotReadyError, ValidationError) as e:
             logger.error(f"Error getting method source: {e}")
@@ -348,7 +249,7 @@ def register_code_browsing_tools(mcp, services: dict):
             validate_session_id(session_id)
 
             session_manager = services["session_manager"]
-            query_executor = services["query_executor"]
+            template_executor = services["template_query_executor"]
 
             session = await session_manager.get_session(session_id)
             if not session:
@@ -359,27 +260,16 @@ def register_code_browsing_tools(mcp, services: dict):
 
             await session_manager.touch_session(session_id)
 
-            # Build query
-            query_parts = ["cpg.call"]
-
-            if callee_pattern:
-                query_parts.append(f'.name("{callee_pattern}")')
-
-            if caller_pattern:
-                query_parts.append(f'.where(_.method.name("{caller_pattern}"))')
-
-            query_parts.append(
-                ".map(c => (c.method.name, c.name, c.code, c.method.filename, c.lineNumber.getOrElse(-1)))"
-            )
-
-            query = "".join(query_parts) + f".dedup.take({limit}).toJsonPretty"
-
-            logger.info(f"list_calls query: {query}")
-
-            result = await query_executor.execute_query(
+            # Execute template query
+            result = await template_executor.execute_template_query(
                 session_id=session_id,
-                cpg_path="/workspace/cpg.bin",
-                query=query,
+                category="core",
+                template_name="find_calls",
+                params={
+                    "caller_pattern": caller_pattern or "",
+                    "callee_pattern": callee_pattern or "",
+                    "limit": limit,
+                },
                 timeout=30,
                 limit=limit,
             )
@@ -390,20 +280,9 @@ def register_code_browsing_tools(mcp, services: dict):
                     "error": {"code": "QUERY_ERROR", "message": result.error},
                 }
 
-            calls = []
-            for item in result.data:
-                if isinstance(item, dict):
-                    calls.append(
-                        {
-                            "caller": item.get("_1", ""),
-                            "callee": item.get("_2", ""),
-                            "code": item.get("_3", ""),
-                            "filename": item.get("_4", ""),
-                            "lineNumber": item.get("_5", -1),
-                        }
-                    )
+            output = _extract_output(result.data)
 
-            return {"success": True, "calls": calls, "total": len(calls)}
+            return {"success": True, "output": output}
 
         except (SessionNotFoundError, SessionNotReadyError, ValidationError) as e:
             logger.error(f"Error listing calls: {e}")
@@ -450,14 +329,14 @@ def register_code_browsing_tools(mcp, services: dict):
         try:
             validate_session_id(session_id)
 
-            if depth < 1 and depth > 15:
-                raise ValidationError("Depth must be at least 1")
+            if depth < 1 or depth > 15:
+                raise ValidationError("Depth must be between 1 and 15")
 
             if direction not in ["outgoing", "incoming"]:
                 raise ValidationError("Direction must be 'outgoing' or 'incoming'")
 
             session_manager = services["session_manager"]
-            query_executor = services["query_executor"]
+            template_executor = services["template_query_executor"]
 
             session = await session_manager.get_session(session_id)
             if not session:
@@ -468,97 +347,17 @@ def register_code_browsing_tools(mcp, services: dict):
 
             await session_manager.touch_session(session_id)
 
-            # Build query based on direction
-            # Escape the method name for regex matching
-            method_escaped = method_name.replace("\\", "\\\\").replace("\"", "\\\"")
-
-            if direction == "outgoing":
-                # Simpler one-liner approach for outgoing calls (what method calls)
-                # For depth 1: direct callees
-                # For depth 2: direct callees + their callees (avoiding cycles)
-                if depth == 1:
-                    query = (
-                        f'cpg.method.name("{method_escaped}").headOption.map(m => '
-                        f'm.call.callee.filterNot(_.name.startsWith("<operator>")).map(c => (m.name, c.name, 1)).l).getOrElse(List()).toJsonPretty'
-                    )
-                else:
-                    # For depth > 1, use inline BFS with braces to ensure proper parsing
-                    query = f"""{{
-val rootMethod = cpg.method.name("{method_escaped}").l
-if (rootMethod.nonEmpty) {{
-  val rootName = rootMethod.head.name
-  var allCalls = scala.collection.mutable.ListBuffer[(String, String, Int)]()
-  var toVisit = scala.collection.mutable.Queue[(io.shiftleft.codepropertygraph.generated.nodes.Method, Int)]()
-  var visited = Set[String]()
-  toVisit.enqueue((rootMethod.head, 0))
-  while (toVisit.nonEmpty) {{
-    val (current, currentDepth) = toVisit.dequeue()
-    val currentName = current.name
-    if (!visited.contains(currentName) && currentDepth < {depth}) {{
-      visited = visited + currentName
-      val callees = current.call.callee.l
-      for (callee <- callees) {{
-        val calleeName = callee.name
-        if (!calleeName.startsWith("<operator>")) {{
-          allCalls += ((currentName, calleeName, currentDepth + 1))
-          if (!visited.contains(calleeName)) {{
-            toVisit.enqueue((callee, currentDepth + 1))
-          }}
-        }}
-      }}
-    }}
-  }}
-  allCalls.toList
-}} else List[(String, String, Int)]()
-}}.toJsonPretty"""
-            else:  # incoming
-                # Simpler one-liner approach for incoming calls (what calls this method)
-                # For depth 1: direct callers
-                # For depth 2: direct callers + their callers (avoiding cycles)
-                if depth == 1:
-                    query = (
-                        f'cpg.method.name("{method_escaped}").headOption.map(m => '
-                        f'm.caller.filterNot(_.name.startsWith("<operator>")).map(c => (c.name, m.name, 1)).l).getOrElse(List()).toJsonPretty'
-                    )
-                else:
-                    # For depth > 1, use inline BFS with braces to ensure proper parsing
-                    query = f"""{{
-val targetMethod = cpg.method.name("{method_escaped}").l
-if (targetMethod.nonEmpty) {{
-  val targetName = targetMethod.head.name
-  var allCallers = scala.collection.mutable.ListBuffer[(String, String, Int)]()
-  var toVisit = scala.collection.mutable.Queue[(io.shiftleft.codepropertygraph.generated.nodes.Method, Int)]()
-  var visited = Set[String]()
-  val directCallers = targetMethod.head.caller.l
-  for (caller <- directCallers) {{
-    allCallers += ((caller.name, targetName, 1))
-    toVisit.enqueue((caller, 1))
-  }}
-  while (toVisit.nonEmpty) {{
-    val (current, currentDepth) = toVisit.dequeue()
-    val currentName = current.name
-    if (!visited.contains(currentName) && currentDepth < {depth}) {{
-      visited = visited + currentName
-      val incomingCallers = current.caller.l
-      for (caller <- incomingCallers) {{
-        val callerName = caller.name
-        if (!callerName.startsWith("<operator>")) {{
-          allCallers += ((callerName, targetName, currentDepth + 1))
-          if (!visited.contains(callerName)) {{
-            toVisit.enqueue((caller, currentDepth + 1))
-          }}
-        }}
-      }}
-    }}
-  }}
-  allCallers.toList
-}} else List[(String, String, Int)]()
-}}.toJsonPretty"""
-
-            result = await query_executor.execute_query(
+            # Execute template query
+            result = await template_executor.execute_template_query(
                 session_id=session_id,
-                cpg_path="/workspace/cpg.bin",
-                query=query,
+                category="core",
+                template_name="call_graph",
+                params={
+                    "method_name": method_name,
+                    "depth": depth,
+                    "direction": direction,
+                    "limit": 500,
+                },
                 timeout=120,
                 limit=500,
             )
@@ -569,23 +368,13 @@ if (targetMethod.nonEmpty) {{
                     "error": {"code": "QUERY_ERROR", "message": result.error},
                 }
 
-            calls = []
-            for item in result.data:
-                if isinstance(item, dict):
-                    calls.append(
-                        {
-                            "from": item.get("_1", ""),
-                            "to": item.get("_2", ""),
-                            "depth": item.get("_3", 1),
-                        }
-                    )
+            output = _extract_output(result.data)
 
             return {
                 "success": True,
                 "root_method": method_name,
                 "direction": direction,
-                "calls": calls,
-                "total": len(calls),
+                "output": output,
             }
 
         except (SessionNotFoundError, SessionNotReadyError, ValidationError) as e:
@@ -632,7 +421,7 @@ if (targetMethod.nonEmpty) {{
             validate_session_id(session_id)
 
             session_manager = services["session_manager"]
-            query_executor = services["query_executor"]
+            template_executor = services["template_query_executor"]
 
             session = await session_manager.get_session(session_id)
             if not session:
@@ -643,16 +432,14 @@ if (targetMethod.nonEmpty) {{
 
             await session_manager.touch_session(session_id)
 
-            query = (
-                f'cpg.method.name("{
-                    method_name}").map(m => (m.name, m.parameter.map(p => '
-                f"(p.name, p.typeFullName, p.index)).l)).toJsonPretty"
-            )
-
-            result = await query_executor.execute_query(
+            # Execute template query
+            result = await template_executor.execute_template_query(
                 session_id=session_id,
-                cpg_path="/workspace/cpg.bin",
-                query=query,
+                category="core",
+                template_name="list_parameters",
+                params={
+                    "method_name": method_name,
+                },
                 timeout=30,
                 limit=10,
             )
@@ -663,25 +450,9 @@ if (targetMethod.nonEmpty) {{
                     "error": {"code": "QUERY_ERROR", "message": result.error},
                 }
 
-            methods = []
-            for item in result.data:
-                if isinstance(item, dict) and "_1" in item and "_2" in item:
-                    params = []
-                    param_list = item.get("_2", [])
+            output = _extract_output(result.data)
 
-                    for param_data in param_list:
-                        if isinstance(param_data, dict):
-                            params.append(
-                                {
-                                    "name": param_data.get("_1", ""),
-                                    "type": param_data.get("_2", ""),
-                                    "index": param_data.get("_3", -1),
-                                }
-                            )
-
-                    methods.append({"method": item.get("_1", ""), "parameters": params})
-
-            return {"success": True, "methods": methods, "total": len(methods)}
+            return {"success": True, "output": output}
 
         except (SessionNotFoundError, SessionNotReadyError, ValidationError) as e:
             logger.error(f"Error listing parameters: {e}")
@@ -735,7 +506,7 @@ if (targetMethod.nonEmpty) {{
             validate_session_id(session_id)
 
             session_manager = services["session_manager"]
-            query_executor = services["query_executor"]
+            template_executor = services["template_query_executor"]
 
             session = await session_manager.get_session(session_id)
             if not session:
@@ -746,26 +517,18 @@ if (targetMethod.nonEmpty) {{
 
             await session_manager.touch_session(session_id)
 
-            # Build query
-            query_parts = ["cpg.literal"]
-
-            if pattern:
-                query_parts.append(f'.code("{pattern}")')
-
-            if literal_type:
-                query_parts.append(f'.typeFullName(".*{literal_type}.*")')
-
-            query_parts.append(
-                ".map(lit => (lit.code, lit.typeFullName, lit.filename, lit.lineNumber.getOrElse(-1), lit.method.name))"
-            )
-            query = "".join(query_parts) + f".take({limit})"
-
-            result = await query_executor.execute_query(
+            # Execute template query
+            result = await template_executor.execute_template_query(
                 session_id=session_id,
-                cpg_path="/workspace/cpg.bin",
-                query=query,
+                category="core",
+                template_name="find_literals",
+                params={
+                    "pattern": pattern or "",
+                    "literal_type": literal_type or "",
+                    "limit": limit,
+                },
                 timeout=30,
-                limit=limit,  # Use the limit parameter
+                limit=limit,
             )
 
             if not result.success:
@@ -774,20 +537,9 @@ if (targetMethod.nonEmpty) {{
                     "error": {"code": "QUERY_ERROR", "message": result.error},
                 }
 
-            literals = []
-            for item in result.data:
-                if isinstance(item, dict):
-                    literals.append(
-                        {
-                            "value": item.get("_1", ""),
-                            "type": item.get("_2", ""),
-                            "filename": item.get("_3", ""),
-                            "lineNumber": item.get("_4", -1),
-                            "method": item.get("_5", ""),
-                        }
-                    )
+            output = _extract_output(result.data)
 
-            return {"success": True, "literals": literals, "total": len(literals)}
+            return {"success": True, "output": output}
 
         except (SessionNotFoundError, SessionNotReadyError, ValidationError) as e:
             logger.error(f"Error finding literals: {e}")
@@ -821,8 +573,9 @@ if (targetMethod.nonEmpty) {{
                     "total_files": 15,
                     "total_methods": 127,
                     "total_calls": 456,
-                    "external_methods": 89,
-                    "lines_of_code": 5432
+                    "user_defined_methods": 89,
+                    "external_methods": 38,
+                    "total_literals": 234
                 }
             }
         """
@@ -830,7 +583,7 @@ if (targetMethod.nonEmpty) {{
             validate_session_id(session_id)
 
             session_manager = services["session_manager"]
-            query_executor = services["query_executor"]
+            template_executor = services["template_query_executor"]
 
             session = await session_manager.get_session(session_id)
             if not session:
@@ -841,63 +594,24 @@ if (targetMethod.nonEmpty) {{
 
             await session_manager.touch_session(session_id)
 
-            # Get metadata
-            meta_query = "cpg.metaData.map(m => (m.language, m.version)).toJsonPretty"
-            meta_result = await query_executor.execute_query(
+            # Execute template query
+            result = await template_executor.execute_template_query(
                 session_id=session_id,
-                cpg_path="/workspace/cpg.bin",
-                query=meta_query,
-                timeout=10,
-                limit=1,
-            )
-
-            language = "unknown"
-            if meta_result.success and meta_result.data:
-                item = meta_result.data[0]
-                if isinstance(item, dict):
-                    language = item.get("_1", "unknown")
-
-            # Get counts
-            stats_query = """
-            cpg.metaData.map(_ => (
-                cpg.file.size,
-                cpg.method.size,
-                cpg.method.isExternal(false).size,
-                cpg.call.size,
-                cpg.literal.size
-            )).toJsonPretty
-            """
-
-            stats_result = await query_executor.execute_query(
-                session_id=session_id,
-                cpg_path="/workspace/cpg.bin",
-                query=stats_query,
+                category="analysis",
+                template_name="codebase_summary",
+                params={},
                 timeout=30,
-                limit=1,
             )
 
-            summary = {
-                "language": language,
-                "total_files": 0,
-                "total_methods": 0,
-                "user_defined_methods": 0,
-                "total_calls": 0,
-                "total_literals": 0,
-            }
+            if not result.success:
+                return {
+                    "success": False,
+                    "error": {"code": "QUERY_ERROR", "message": result.error},
+                }
 
-            if stats_result.success and stats_result.data:
-                item = stats_result.data[0]
-                if isinstance(item, dict):
-                    summary["total_files"] = item.get("_1", 0)
-                    summary["total_methods"] = item.get("_2", 0)
-                    summary["user_defined_methods"] = item.get("_3", 0)
-                    summary["total_calls"] = item.get("_4", 0)
-                    summary["total_literals"] = item.get("_5", 0)
-                    summary["external_methods"] = (
-                        summary["total_methods"] - summary["user_defined_methods"]
-                    )
+            output = _extract_output(result.data)
 
-            return {"success": True, "summary": summary}
+            return {"success": True, "summary": {"output": output}}
 
         except (SessionNotFoundError, SessionNotReadyError, ValidationError) as e:
             logger.error(f"Error getting codebase summary: {e}")
@@ -963,14 +677,12 @@ if (targetMethod.nonEmpty) {{
 
             # Get source directory from session
             if session.source_type == "github":
-                # For GitHub repos, use the cached directory
                 from .core_tools import get_cpg_cache_key
                 cpg_cache_key = get_cpg_cache_key(
                     session.source_type, session.source_path, session.language
                 )
                 source_dir = os.path.join(playground_path, "codebases", cpg_cache_key)
             else:
-                # For local paths, use the session source path directly
                 source_path = session.source_path
                 if not os.path.isabs(source_path):
                     source_path = os.path.abspath(source_path)
@@ -981,9 +693,7 @@ if (targetMethod.nonEmpty) {{
 
             # Check if file exists
             if not os.path.exists(file_path):
-                raise ValidationError(
-                    f"File '{filename}' not found in source directory"
-                )
+                raise ValidationError(f"File '{filename}' not found in source directory")
 
             if not os.path.isfile(file_path):
                 raise ValidationError(f"'{filename}' is not a file")
@@ -1003,7 +713,7 @@ if (targetMethod.nonEmpty) {{
                 end_line = total_lines
 
             # Extract the code snippet (lines are 0-indexed in the list)
-            code_lines = lines[start_line - 1: end_line]
+            code_lines = lines[start_line - 1 : end_line]
             code = "".join(code_lines)
 
             return {
@@ -1026,6 +736,7 @@ if (targetMethod.nonEmpty) {{
                 "success": False,
                 "error": {"code": "INTERNAL_ERROR", "message": str(e)},
             }
+
     @mcp.tool()
     async def find_bounds_checks(
         session_id: str, buffer_access_location: str
@@ -1034,14 +745,11 @@ if (targetMethod.nonEmpty) {{
         Find bounds checks near buffer access.
 
         Verify if buffer accesses have corresponding bounds checks by analyzing
-        comparison operations involving the index variable. This helps identify
-        potential buffer overflow vulnerabilities where bounds checks are missing
-        or happen after the access.
+        comparison operations involving the index variable.
 
         Args:
             session_id: The session ID from create_cpg_session
             buffer_access_location: Location of buffer access in format "filename:line"
-                                  (e.g., "parser.c:3393")
 
         Returns:
             {
@@ -1052,16 +760,7 @@ if (targetMethod.nonEmpty) {{
                     "buffer": "buf",
                     "index": "len++"
                 },
-                "bounds_checks": [
-                    {
-                        "line": 3396,
-                        "code": "if (len >= XML_MAX_NAMELEN)",
-                        "checked_variable": "len",
-                        "bound": "XML_MAX_NAMELEN",
-                        "operator": ">=",
-                        "position": "AFTER_ACCESS"
-                    }
-                ],
+                "bounds_checks": [...],
                 "check_before_access": false,
                 "check_after_access": true
             }
@@ -1093,9 +792,7 @@ if (targetMethod.nonEmpty) {{
 
             await session_manager.touch_session(session_id)
 
-            # Build the Joern query to find buffer access and bounds checks
-            # Use raw string to avoid escaping issues
-            # Wrap in braces to avoid REPL line-by-line interpretation issues
+            # For bounds checks, we need to use inline Scala because of complex JSON escaping
             query_template = r"""{
 def escapeJson(s: String): String = {
 s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
@@ -1126,7 +823,7 @@ case None =>
 "{\"success\":false,\"error\":{\"code\":\"NOT_FOUND\",\"message\":\"No buffer access found at FILENAME_PLACEHOLDER:LINE_NUM_PLACEHOLDER\"}}"
 }
 }"""
-            
+
             query = query_template.replace("FILENAME_PLACEHOLDER", filename).replace("LINE_NUM_PLACEHOLDER", str(line_num))
 
             result = await query_executor.execute_query(
@@ -1142,25 +839,13 @@ case None =>
                     "error": {"code": "QUERY_ERROR", "message": result.error},
                 }
 
-            # Parse the JSON result
-            import json
+            # Return raw output
+            output = _extract_output(result.data)
 
-            if isinstance(result.data, list) and len(result.data) > 0:
-                result_data = result.data[0]
-                
-                # Handle JSON string response from upickle.write
-                if isinstance(result_data, str):
-                    return json.loads(result_data)
-                else:
-                    return result_data
-            else:
-                return {
-                    "success": False,
-                    "error": {
-                        "code": "NO_RESULT",
-                        "message": "Query returned no results",
-                    },
-                }
+            return {
+                "success": True,
+                "output": output,
+            }
 
         except (SessionNotFoundError, SessionNotReadyError, ValidationError) as e:
             logger.error(f"Error finding bounds checks: {e}")

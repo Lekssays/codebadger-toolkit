@@ -1,7 +1,12 @@
-# Dockerfile for Joern - Code Property Graph Analysis Tool
-# This builds a local Joern image with all necessary tools for C/C++ analysis
+# Dockerfile for joern-mcp - All-in-one container
+# Includes Joern, Redis, Python MCP server, and all dependencies
 
 FROM eclipse-temurin:21-jdk-jammy
+
+# Set environment
+ENV JOERN_VERSION=4.0.429
+ENV JOERN_HOME=/opt/joern
+ENV APP_HOME=/app
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -10,11 +15,11 @@ RUN apt-get update && apt-get install -y \
     wget \
     unzip \
     build-essential \
+    python3 \
+    python3-pip \
+    python3-venv \
+    redis-server \
     && rm -rf /var/lib/apt/lists/*
-
-# Set Joern version
-ENV JOERN_VERSION=4.0.429
-ENV JOERN_HOME=/opt/joern
 
 # Download and install Joern from joernio/joern GitHub releases
 RUN mkdir -p ${JOERN_HOME} && \
@@ -28,14 +33,37 @@ RUN mkdir -p ${JOERN_HOME} && \
 # Add Joern CLI tools to PATH
 ENV PATH="${JOERN_HOME}/joern-cli:${JOERN_HOME}/joern-cli/bin:${PATH}"
 
-# Create workspace directory
-RUN mkdir -p /workspace /playground
+# Create application directories
+RUN mkdir -p ${APP_HOME} /workspace /playground /playground/codebases /playground/cpgs /playground/temp /playground/logs
+
+# Copy Python requirements
+COPY requirements.txt ${APP_HOME}/
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r ${APP_HOME}/requirements.txt
+
+# Copy application code
+COPY src/ ${APP_HOME}/src/
+COPY main.py ${APP_HOME}/
+COPY config.yaml ${APP_HOME}/
+COPY queries/ ${APP_HOME}/queries/
+COPY entrypoint.sh /
+
+# Make entrypoint executable
+RUN chmod +x /entrypoint.sh
 
 # Set working directory
-WORKDIR /workspace
+WORKDIR ${APP_HOME}
 
-# Verify installation - check joern
-RUN joern --help
+# Verify Joern installation
+RUN joern --help > /dev/null
 
-# Default command - keep container running for interactive use
-CMD ["tail", "-f", "/dev/null"]
+# Expose MCP server port and Joern HTTP port (for debugging/direct access if needed)
+EXPOSE 4242 8080
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://127.0.0.1:4242/health || exit 1
+
+# Start the container
+ENTRYPOINT ["/entrypoint.sh"]

@@ -2,12 +2,14 @@
 fastmcp>=2.12.4
 mcp>=1.16.0
 httpx>=0.28.1
+websockets>=15.0.1
 uvicorn[standard]==0.34.0
 pydantic==2.11.10
 docker==7.1.0
 gitpython==3.1.45
 PyYAML==6.0.3
 redis==6.4.0
+jinja2>=3.1.6
 
 # Development dependencies
 pytest==8.4.2
