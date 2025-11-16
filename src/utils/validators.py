@@ -44,15 +44,15 @@ def validate_language(language: str):
         )
 
 
-def validate_session_id(session_id: str):
-    """Validate session ID format"""
-    if not session_id or not isinstance(session_id, str):
-        raise ValidationError("session_id must be a non-empty string")
+def validate_codebase_hash(codebase_hash: str):
+    """Validate codebase hash format"""
+    if not codebase_hash or not isinstance(codebase_hash, str):
+        raise ValidationError("codebase_hash must be a non-empty string")
 
-    # UUID pattern
-    uuid_pattern = r"^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"
-    if not re.match(uuid_pattern, session_id):
-        raise ValidationError("session_id must be a valid UUID")
+    # Hash pattern (16 character hex string)
+    hash_pattern = r"^[a-f0-9]{16}$"
+    if not re.match(hash_pattern, codebase_hash):
+        raise ValidationError("codebase_hash must be a valid 16-character hex string")
 
 
 def validate_github_url(url: str) -> bool:

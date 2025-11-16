@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Test runner for Joern MCP
+Test runner for CodeBadger Toolkit
 """
 import sys
 import subprocess

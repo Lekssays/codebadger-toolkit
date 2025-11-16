@@ -1,20 +1,11 @@
 """
-Data models for Joern MCP Server
+Data models for CodeBadger Toolkit Server
 """
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
-
-
-class SessionStatus(str, Enum):
-    """Session status enumeration"""
-
-    INITIALIZING = "initializing"
-    GENERATING = "generating"
-    READY = "ready"
-    ERROR = "error"
 
 
 class SourceType(str, Enum):
@@ -24,53 +15,66 @@ class SourceType(str, Enum):
     GITHUB = "github"
 
 
-@dataclass
-class Session:
-    """CPG session data model"""
+class SessionStatus(str, Enum):
+    """Status enumeration for CPG operations (kept for backward compatibility)"""
 
-    id: str
-    container_id: Optional[str] = None
-    source_type: str = ""
-    source_path: str = ""
-    language: str = ""
-    status: str = SessionStatus.INITIALIZING.value
-    cpg_path: Optional[str] = None
+    INITIALIZING = "initializing"
+    GENERATING = "generating"
+    READY = "ready"
+    ERROR = "error"
+
+
+@dataclass
+class CodebaseInfo:
+    """Codebase tracking data model - uses hash as identifier"""
+
+    hash: str  # The codebase hash (cpg_cache_key)
+    source_type: str  # "local" or "github"
+    source_path: str  # Original path or GitHub URL
+    language: str  # Programming language
+    cpg_path: Optional[str] = None  # Path to CPG file
+    joern_port: Optional[int] = None  # Port for Joern server instance
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     last_accessed: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    error_message: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert session to dictionary"""
+        """Convert codebase info to dictionary"""
+        import json
         return {
-            "id": self.id,
-            "container_id": self.container_id,
+            "hash": self.hash,
             "source_type": self.source_type,
             "source_path": self.source_path,
             "language": self.language,
-            "status": self.status,
             "cpg_path": self.cpg_path,
+            "joern_port": self.joern_port,
             "created_at": self.created_at.isoformat(),
             "last_accessed": self.last_accessed.isoformat(),
-            "error_message": self.error_message,
-            "metadata": self.metadata,
+            "metadata": json.dumps(self.metadata) if self.metadata else "{}",
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "Session":
-        """Create session from dictionary"""
+    def from_dict(cls, data: Dict[str, Any]) -> "CodebaseInfo":
+        """Create codebase info from dictionary"""
+        import json
+        # Parse metadata if it's a JSON string
+        metadata = data.get("metadata", {})
+        if isinstance(metadata, str):
+            try:
+                metadata = json.loads(metadata)
+            except:
+                metadata = {}
+        
         return cls(
-            id=data["id"],
-            container_id=data.get("container_id"),
+            hash=data["hash"],
             source_type=data.get("source_type", ""),
             source_path=data.get("source_path", ""),
             language=data.get("language", ""),
-            status=data.get("status", SessionStatus.INITIALIZING.value),
             cpg_path=data.get("cpg_path"),
+            joern_port=int(data["joern_port"]) if data.get("joern_port") else None,
             created_at=datetime.fromisoformat(data["created_at"]),
             last_accessed=datetime.fromisoformat(data["last_accessed"]),
-            error_message=data.get("error_message"),
-            metadata=data.get("metadata", {}),
+            metadata=metadata,
         )
 
 
@@ -325,7 +329,7 @@ class QueryConfig:
 class StorageConfig:
     """Storage configuration"""
 
-    workspace_root: str = "/tmp/joern-mcp"
+    workspace_root: str = "/tmp/codebadger-toolkit"
     cleanup_on_shutdown: bool = True
 
 

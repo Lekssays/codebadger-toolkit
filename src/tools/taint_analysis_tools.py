@@ -1,5 +1,5 @@
 """
-Taint Analysis MCP Tools for Joern MCP Server
+Taint Analysis MCP Tools for CodeBadger Toolkit Server
 Security-focused tools for analyzing data flows and vulnerabilities
 """
 
@@ -8,12 +8,9 @@ import re
 from typing import Any, Dict, Optional
 
 from ..exceptions import (
-    SessionNotFoundError,
-    SessionNotReadyError,
-    ValidationError,
+            ValidationError,
 )
-from ..models import SessionStatus
-from ..utils.validators import validate_session_id
+from ..utils.validators import validate_codebase_hash
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +20,7 @@ def register_taint_analysis_tools(mcp, services: dict):
 
     @mcp.tool()
     async def find_taint_sources(
-        session_id: str,
+        codebase_hash: str,
         language: Optional[str] = None,
         source_patterns: Optional[list] = None,
         filename: Optional[str] = None,
@@ -37,7 +34,7 @@ def register_taint_analysis_tools(mcp, services: dict):
         identifying where external data enters the program.
 
         Args:
-            session_id: The session ID from create_cpg_session
+            codebase_hash: The session ID from create_cpg_session
             language: Programming language to use for default patterns (e.g., "c", "java")
                 If not provided, uses the session's language
             source_patterns: Optional list of regex patterns to match source function names
@@ -63,22 +60,18 @@ def register_taint_analysis_tools(mcp, services: dict):
             }
         """
         try:
-            validate_session_id(session_id)
+            validate_codebase_hash(codebase_hash)
 
-            session_manager = services["session_manager"]
+            codebase_tracker = services["codebase_tracker"]
             query_executor = services["query_executor"]
 
-            session = await session_manager.get_session(session_id)
-            if not session:
-                raise SessionNotFoundError(f"Session {session_id} not found")
-
-            if session.status != SessionStatus.READY.value:
-                raise SessionNotReadyError(f"Session is in '{session.status}' status")
-
-            await session_manager.touch_session(session_id)
+            # Verify CPG exists for this codebase
+            codebase_info = await codebase_tracker.get_codebase(codebase_hash)
+            if not codebase_info or not codebase_info.cpg_path:
+                raise ValidationError(f"CPG not found for codebase {codebase_hash}. Generate it first using generate_cpg.")
 
             # Determine language and patterns
-            lang = language or session.language or "c"
+            lang = language or codebase_info.language or "c"
             cfg = services["config"]
             taint_cfg = (
                 getattr(cfg.cpg, "taint_sources", {})
@@ -88,15 +81,10 @@ def register_taint_analysis_tools(mcp, services: dict):
 
             patterns = source_patterns or taint_cfg.get(lang, [])
             if not patterns:
-                # Fallback to common C patterns
+                # Fallback patterns matching config.yaml defaults for C
                 patterns = [
-                    "getenv",
-                    "fgets",
-                    "scanf",
-                    "read",
-                    "recv",
-                    "accept",
-                    "fopen",
+                    "getenv", "fgets", "scanf", "read", "recv", "accept", 
+                    "fopen", "gets", "getchar", "fscanf", "fread", "recvfrom", "recvmsg"
                 ]
 
             # Build Joern query searching for call names matching any pattern
@@ -112,8 +100,8 @@ def register_taint_analysis_tools(mcp, services: dict):
                 query = f'cpg.call.name("{joined}").map(c => (c.id, c.name, c.code, c.file.name.headOption.getOrElse("unknown"), c.lineNumber.getOrElse(-1), c.method.fullName)).take({limit})'
 
             result = await query_executor.execute_query(
-                session_id=session_id,
-                cpg_path="/workspace/cpg.bin",
+                codebase_hash=codebase_hash,
+                cpg_path=codebase_info.cpg_path,
                 query=query,
                 timeout=30,
                 limit=limit,
@@ -141,7 +129,7 @@ def register_taint_analysis_tools(mcp, services: dict):
 
             return {"success": True, "sources": sources, "total": len(sources)}
 
-        except (SessionNotFoundError, SessionNotReadyError, ValidationError) as e:
+        except (ValidationError, ValidationError, ValidationError) as e:
             logger.error(f"Error finding taint sources: {e}")
             return {
                 "success": False,
@@ -156,7 +144,7 @@ def register_taint_analysis_tools(mcp, services: dict):
 
     @mcp.tool()
     async def find_taint_sinks(
-        session_id: str,
+        codebase_hash: str,
         language: Optional[str] = None,
         sink_patterns: Optional[list] = None,
         filename: Optional[str] = None,
@@ -170,7 +158,7 @@ def register_taint_analysis_tools(mcp, services: dict):
         Useful for identifying where untrusted data could cause harm.
 
         Args:
-            session_id: The session ID from create_cpg_session
+            codebase_hash: The session ID from create_cpg_session
             language: Programming language to use for default patterns (e.g., "c", "java")
                 If not provided, uses the session's language
             sink_patterns: Optional list of regex patterns to match sink function names
@@ -196,21 +184,17 @@ def register_taint_analysis_tools(mcp, services: dict):
             }
         """
         try:
-            validate_session_id(session_id)
+            validate_codebase_hash(codebase_hash)
 
-            session_manager = services["session_manager"]
+            codebase_tracker = services["codebase_tracker"]
             query_executor = services["query_executor"]
 
-            session = await session_manager.get_session(session_id)
-            if not session:
-                raise SessionNotFoundError(f"Session {session_id} not found")
+            # Verify CPG exists for this codebase
+            codebase_info = await codebase_tracker.get_codebase(codebase_hash)
+            if not codebase_info or not codebase_info.cpg_path:
+                raise ValidationError(f"CPG not found for codebase {codebase_hash}. Generate it first using generate_cpg.")
 
-            if session.status != SessionStatus.READY.value:
-                raise SessionNotReadyError(f"Session is in '{session.status}' status")
-
-            await session_manager.touch_session(session_id)
-
-            lang = language or session.language or "c"
+            lang = language or codebase_info.language or "c"
             cfg = services["config"]
             taint_cfg = (
                 getattr(cfg.cpg, "taint_sinks", {})
@@ -220,7 +204,11 @@ def register_taint_analysis_tools(mcp, services: dict):
 
             patterns = sink_patterns or taint_cfg.get(lang, [])
             if not patterns:
-                patterns = ["system", "popen", "execl", "execv", "sprintf", "fprintf"]
+                # Fallback patterns matching config.yaml defaults for C
+                patterns = [
+                    "system", "popen", "execl", "execv", "execve", "sprintf", "fprintf",
+                    "snprintf", "vsprintf", "vfprintf", "strcpy", "strcat", "gets"
+                ]
 
             # Remove trailing parens from patterns for proper regex matching
             cleaned_patterns = [p.rstrip("(") for p in patterns]
@@ -234,8 +222,8 @@ def register_taint_analysis_tools(mcp, services: dict):
                 query = f'cpg.call.name("{joined}").map(c => (c.id, c.name, c.code, c.file.name.headOption.getOrElse("unknown"), c.lineNumber.getOrElse(-1), c.method.fullName)).take({limit})'
 
             result = await query_executor.execute_query(
-                session_id=session_id,
-                cpg_path="/workspace/cpg.bin",
+                codebase_hash=codebase_hash,
+                cpg_path=codebase_info.cpg_path,
                 query=query,
                 timeout=30,
                 limit=limit,
@@ -263,7 +251,7 @@ def register_taint_analysis_tools(mcp, services: dict):
 
             return {"success": True, "sinks": sinks, "total": len(sinks)}
 
-        except (SessionNotFoundError, SessionNotReadyError, ValidationError) as e:
+        except (ValidationError, ValidationError, ValidationError) as e:
             logger.error(f"Error finding taint sinks: {e}")
             return {
                 "success": False,
@@ -278,7 +266,7 @@ def register_taint_analysis_tools(mcp, services: dict):
 
     @mcp.tool()
     async def find_taint_flows(
-        session_id: str,
+        codebase_hash: str,
         source_node_id: Optional[str] = None,
         sink_node_id: Optional[str] = None,
         source_location: Optional[str] = None,
@@ -333,7 +321,7 @@ def register_taint_analysis_tools(mcp, services: dict):
         - Best used as a starting point for deeper investigation
 
         Args:
-            session_id: The session ID from create_cpg_session
+            codebase_hash: The session ID from create_cpg_session
             source_node_id: Node ID of source call (from find_taint_sources)
                 Example: "12345"
             sink_node_id: Node ID of sink call (from find_taint_sinks)
@@ -402,7 +390,7 @@ def register_taint_analysis_tools(mcp, services: dict):
 
         Example - Source and Sink provided:
             find_taint_flows(
-                session_id="abc-123",
+                codebase_hash="abc-123",
                 source_location="main.c:42",   # allocate_memory(100)
                 sink_location="main.c:58"      # deallocate_memory(buffer)
             )
@@ -410,20 +398,20 @@ def register_taint_analysis_tools(mcp, services: dict):
 
         Example - Only Source provided:
             find_taint_flows(
-                session_id="abc-123",
+                codebase_hash="abc-123",
                 source_location="main.c:42"    # allocate_memory(100)
             )
             # Result: ✓ Found flows to all dangerous sinks (free, system, etc.) that use the allocated variable
 
         Example - Only Sink provided (ERROR):
             find_taint_flows(
-                session_id="abc-123",
+                codebase_hash="abc-123",
                 sink_location="main.c:58"      # deallocate_memory(buffer)
             )
             # Result: ❌ Validation error - only sink not supported
         """
         try:
-            validate_session_id(session_id)
+            validate_codebase_hash(codebase_hash)
 
             # Validate that we have proper source and sink specifications
             if not source_node_id and not source_location:
@@ -445,17 +433,13 @@ def register_taint_analysis_tools(mcp, services: dict):
                         "Only sink provided - not supported. Please provide a source to find flows from."
                     )
 
-            session_manager = services["session_manager"]
+            codebase_tracker = services["codebase_tracker"]
             query_executor = services["query_executor"]
 
-            session = await session_manager.get_session(session_id)
-            if not session:
-                raise SessionNotFoundError(f"Session {session_id} not found")
-
-            if session.status != SessionStatus.READY.value:
-                raise SessionNotReadyError(f"Session is in '{session.status}' status")
-
-            await session_manager.touch_session(session_id)
+            # Verify CPG exists for this codebase
+            codebase_info = await codebase_tracker.get_codebase(codebase_hash)
+            if not codebase_info or not codebase_info.cpg_path:
+                raise ValidationError(f"CPG not found for codebase {codebase_hash}. Generate it first using generate_cpg.")
 
             # Resolve source and sink nodes
             source_info = None
@@ -496,8 +480,8 @@ def register_taint_analysis_tools(mcp, services: dict):
                             line_num}).map(c => (c.id, c.code, c.file.name.headOption.getOrElse("unknown"), c.lineNumber.getOrElse(-1), c.method.fullName)).take(1).l'
 
                 result = await query_executor.execute_query(
-                    session_id=session_id,
-                    cpg_path="/workspace/cpg.bin",
+                    codebase_hash=codebase_hash,
+                    cpg_path=codebase_info.cpg_path,
                     query=query,
                     timeout=10,
                     limit=1,
@@ -627,8 +611,8 @@ def register_taint_analysis_tools(mcp, services: dict):
                 }}.toJsonPretty"""
 
             result = await query_executor.execute_query(
-                session_id=session_id,
-                cpg_path="/workspace/cpg.bin",
+                codebase_hash=codebase_hash,
+                cpg_path=codebase_info.cpg_path,
                 query=query,
                 timeout=timeout,
                 limit=1,
@@ -686,7 +670,7 @@ def register_taint_analysis_tools(mcp, services: dict):
                     "message": f"Found {len(flows)} flows from source to dangerous sinks" if flows else "No flows found from source to dangerous sinks",
                 }
 
-        except (SessionNotFoundError, SessionNotReadyError, ValidationError) as e:
+        except (ValidationError, ValidationError, ValidationError) as e:
             logger.error(f"Error finding taint flows: {e}")
             return {
                 "success": False,
@@ -701,7 +685,7 @@ def register_taint_analysis_tools(mcp, services: dict):
 
     @mcp.tool()
     async def check_method_reachability(
-        session_id: str, source_method: str, target_method: str
+        codebase_hash: str, source_method: str, target_method: str
     ) -> Dict[str, Any]:
         """
         Check if one method can reach another through the call graph.
@@ -711,7 +695,7 @@ def register_taint_analysis_tools(mcp, services: dict):
         and potential execution paths.
 
         Args:
-            session_id: The session ID from create_cpg_session
+            codebase_hash: The session ID from create_cpg_session
             source_method: Name of the source method (can be regex pattern)
             target_method: Name of the target method (can be regex pattern)
 
@@ -725,19 +709,15 @@ def register_taint_analysis_tools(mcp, services: dict):
             }
         """
         try:
-            validate_session_id(session_id)
+            validate_codebase_hash(codebase_hash)
 
-            session_manager = services["session_manager"]
+            codebase_tracker = services["codebase_tracker"]
             query_executor = services["query_executor"]
 
-            session = await session_manager.get_session(session_id)
-            if not session:
-                raise SessionNotFoundError(f"Session {session_id} not found")
-
-            if session.status != SessionStatus.READY.value:
-                raise SessionNotReadyError(f"Session is in '{session.status}' status")
-
-            await session_manager.touch_session(session_id)
+            # Verify CPG exists for this codebase
+            codebase_info = await codebase_tracker.get_codebase(codebase_hash)
+            if not codebase_info or not codebase_info.cpg_path:
+                raise ValidationError(f"CPG not found for codebase {codebase_hash}. Generate it first using generate_cpg.")
 
             # Escape patterns for regex
             source_escaped = re.escape(source_method)
@@ -779,8 +759,8 @@ def register_taint_analysis_tools(mcp, services: dict):
             )
 
             result = await query_executor.execute_query(
-                session_id=session_id,
-                cpg_path="/workspace/cpg.bin",
+                codebase_hash=codebase_hash,
+                cpg_path=codebase_info.cpg_path,
                 query=query,
                 timeout=60,
                 limit=1,
@@ -811,7 +791,7 @@ def register_taint_analysis_tools(mcp, services: dict):
                 "message": message,
             }
 
-        except (SessionNotFoundError, SessionNotReadyError, ValidationError) as e:
+        except (ValidationError, ValidationError, ValidationError) as e:
             logger.error(f"Error checking method reachability: {e}")
             return {
                 "success": False,
@@ -826,7 +806,7 @@ def register_taint_analysis_tools(mcp, services: dict):
 
     @mcp.tool()
     async def get_program_slice(
-        session_id: str,
+        codebase_hash: str,
         node_id: Optional[str] = None,
         location: Optional[str] = None,
         include_dataflow: bool = True,
@@ -848,7 +828,7 @@ def register_taint_analysis_tools(mcp, services: dict):
         avoid ambiguity, especially when multiple calls appear on the same line.
 
         Args:
-            session_id: The session ID from create_cpg_session
+            codebase_hash: The session ID from create_cpg_session
             node_id: Preferred: Direct CPG node ID of the target call
                 (Get from list_calls or other query results)
                 Example: "12345"
@@ -894,23 +874,19 @@ def register_taint_analysis_tools(mcp, services: dict):
             }
         """
         try:
-            validate_session_id(session_id)
+            validate_codebase_hash(codebase_hash)
 
             # Validate that we have proper node identification
             if not node_id and not location:
                 raise ValidationError("Either node_id or location must be provided")
 
-            session_manager = services["session_manager"]
+            codebase_tracker = services["codebase_tracker"]
             query_executor = services["query_executor"]
 
-            session = await session_manager.get_session(session_id)
-            if not session:
-                raise SessionNotFoundError(f"Session {session_id} not found")
-
-            if session.status != SessionStatus.READY.value:
-                raise SessionNotReadyError(f"Session is in '{session.status}' status")
-
-            await session_manager.touch_session(session_id)
+            # Verify CPG exists for this codebase
+            codebase_info = await codebase_tracker.get_codebase(codebase_hash)
+            if not codebase_info or not codebase_info.cpg_path:
+                raise ValidationError(f"CPG not found for codebase {codebase_hash}. Generate it first using generate_cpg.")
 
             # Parse location if provided
             filename = None
@@ -1061,8 +1037,8 @@ resultJson
 
             # Execute the query
             result = await query_executor.execute_query(
-                session_id=session_id,
-                cpg_path="/workspace/cpg.bin",
+                codebase_hash=codebase_hash,
+                cpg_path=codebase_info.cpg_path,
                 query=query,
                 timeout=timeout,
             )
@@ -1093,7 +1069,7 @@ resultJson
                     },
                 }
 
-        except (SessionNotFoundError, SessionNotReadyError, ValidationError) as e:
+        except (ValidationError, ValidationError, ValidationError) as e:
             logger.error(f"Error getting program slice: {e}")
             return {
                 "success": False,
@@ -1108,7 +1084,7 @@ resultJson
 
     @mcp.tool()
     async def find_argument_flows(
-        session_id: str,
+        codebase_hash: str,
         source_name: str,
         sink_name: str,
         arg_index: int = 0,
@@ -1154,7 +1130,7 @@ resultJson
         - list_methods: Find methods that use specific calls (callee_pattern parameter)
 
         Args:
-            session_id: The session ID from create_cpg_session
+            codebase_hash: The session ID from create_cpg_session
             source_name: Name of the source function call (where argument originates)
             sink_name: Name of the sink function call (where argument is used)
             arg_index: Argument position to match (0-based indexing, default: 0)
@@ -1190,7 +1166,7 @@ resultJson
         Example Usage:
             # Find where user_count is passed to both functions
             find_argument_flows(
-                session_id="abc-123",
+                codebase_hash="abc-123",
                 source_name="validate_input",
                 sink_name="process_data",
                 arg_index=0  # user_count is the first argument
@@ -1198,23 +1174,21 @@ resultJson
 
             # This WON'T work: malloc -> free (return value vs variable name)
             find_argument_flows(
-                session_id="abc-123",
+                codebase_hash="abc-123",
                 source_name="malloc",
                 sink_name="free",
                 arg_index=0  # Won't match: malloc returns pointer, free takes variable
             )
         """
         try:
-            validate_session_id(session_id)
-            session_manager = services["session_manager"]
+            validate_codebase_hash(codebase_hash)
+            codebase_tracker = services["codebase_tracker"]
             query_executor = services["query_executor"]
 
-            session = await session_manager.get_session(session_id)
-            if not session:
-                raise SessionNotFoundError(f"Session {session_id} not found")
-            if session.status != SessionStatus.READY.value:
-                raise SessionNotReadyError(f"Session is in '{session.status}' status")
-            await session_manager.touch_session(session_id)
+            # Verify CPG exists for this codebase
+            codebase_info = await codebase_tracker.get_codebase(codebase_hash)
+            if not codebase_info or not codebase_info.cpg_path:
+                raise ValidationError(f"CPG not found for codebase {codebase_hash}. Generate it first using generate_cpg.")
 
             # Single-line CPGQL query for argument-matching flows
             query = (
@@ -1246,8 +1220,8 @@ resultJson
             )
 
             result = await query_executor.execute_query(
-                session_id=session_id,
-                cpg_path="/workspace/cpg.bin",
+                codebase_hash=codebase_hash,
+                cpg_path=codebase_info.cpg_path,
                 query=query,
                 timeout=60,
                 limit=limit,
@@ -1266,7 +1240,7 @@ resultJson
                 "note": "Only finds EXACT expression matches, not semantic dataflow",
             }
 
-        except (SessionNotFoundError, SessionNotReadyError, ValidationError) as e:
+        except (ValidationError, ValidationError, ValidationError) as e:
             logger.error(f"Error finding argument flows: {e}")
             return {
                 "success": False,
@@ -1281,7 +1255,7 @@ resultJson
 
     @mcp.tool()
     async def get_data_dependencies(
-        session_id: str,
+        codebase_hash: str,
         location: str,
         variable: str,
         direction: str = "backward",
@@ -1294,7 +1268,7 @@ resultJson
         can affect a potentially vulnerable operation or where tainted data can flow.
 
         Args:
-            session_id: The session ID from create_cpg_session
+            codebase_hash: The session ID from create_cpg_session
             location: Location in format "filename:line" (e.g., "parser.c:3393")
             variable: Name of the variable to analyze (e.g., "len", "buffer")
             direction: Analysis direction - "backward" (default) or "forward"
@@ -1331,7 +1305,7 @@ resultJson
 
         Example - Backward Analysis (find what sets a variable):
             get_data_dependencies(
-                session_id="abc-123",
+                codebase_hash="abc-123",
                 location="parser.c:3393",  # The COPY_BUF call
                 variable="len",
                 direction="backward"
@@ -1341,7 +1315,7 @@ resultJson
 
         Example - Forward Analysis (find what uses a variable):
             get_data_dependencies(
-                session_id="abc-123",
+                codebase_hash="abc-123",
                 location="parser.c:3383",  # Where len is initialized
                 variable="len",
                 direction="forward"
@@ -1349,7 +1323,7 @@ resultJson
             # Returns all usages and propagations of 'len' after line 3383
         """
         try:
-            validate_session_id(session_id)
+            validate_codebase_hash(codebase_hash)
 
             # Validate location format
             if ":" not in location:
@@ -1369,17 +1343,13 @@ resultJson
             if direction not in ["backward", "forward"]:
                 raise ValidationError("direction must be 'backward' or 'forward'")
 
-            session_manager = services["session_manager"]
+            codebase_tracker = services["codebase_tracker"]
             query_executor = services["query_executor"]
 
-            session = await session_manager.get_session(session_id)
-            if not session:
-                raise SessionNotFoundError(f"Session {session_id} not found")
-
-            if session.status != SessionStatus.READY.value:
-                raise SessionNotReadyError(f"Session is in '{session.status}' status")
-
-            await session_manager.touch_session(session_id)
+            # Verify CPG exists for this codebase
+            codebase_info = await codebase_tracker.get_codebase(codebase_hash)
+            if not codebase_info or not codebase_info.cpg_path:
+                raise ValidationError(f"CPG not found for codebase {codebase_hash}. Generate it first using generate_cpg.")
 
             # Build inline Scala query (like find_bounds_checks)
             # Wrap in braces to avoid REPL line-by-line interpretation issues
@@ -1496,8 +1466,8 @@ targetMethodOpt match {
 
             # Execute the query
             result = await query_executor.execute_query(
-                session_id=session_id,
-                cpg_path="/workspace/cpg.bin",
+                codebase_hash=codebase_hash,
+                cpg_path=codebase_info.cpg_path,
                 query=query,
                 timeout=60,
             )
@@ -1528,7 +1498,7 @@ targetMethodOpt match {
                     },
                 }
 
-        except (SessionNotFoundError, SessionNotReadyError, ValidationError) as e:
+        except (ValidationError, ValidationError, ValidationError) as e:
             logger.error(f"Error getting data dependencies: {e}")
             return {
                 "success": False,

@@ -2,7 +2,9 @@
 fastmcp>=2.12.4
 mcp>=1.16.0
 httpx>=0.28.1
-uvicorn[standard]==0.34.0
+aiohttp>=3.13.2
+uvicorn>=0.38.0
+websockets>=15.0.1
 pydantic==2.11.10
 docker==7.1.0
 gitpython==3.1.45

@@ -1,4 +1,4 @@
-"""Utility functions for the Joern MCP Server."""
+"""Utility functions for the CodeBadger Toolkit Server."""
 
 from pathlib import Path
 from typing import List

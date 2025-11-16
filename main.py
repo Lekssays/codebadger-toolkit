@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-joern-mcp Server - Main entry point using FastMCP
+CodeBadger Toolkit Server - Main entry point using FastMCP
 
-This is the main entry point for the joern-mcp Server that provides static code analysis
-capabilities using Joern's Code Property Graph (CPG) technology with interactive shells.
+This is the main entry point for the CodeBadger Toolkit Server that provides static code analysis
+capabilities through the Model Context Protocol (MCP) using Joern's Code Property Graph.
 """
 
 import asyncio
@@ -15,11 +15,10 @@ from starlette.responses import JSONResponse
 
 from src.config import load_config
 from src.services import (
-    SessionManager,
+    CodebaseTracker,
     GitManager,
     CPGGenerator,
-    QueryExecutor,
-    DockerOrchestrator
+    QueryExecutor
 )
 from src.utils import RedisClient, setup_logging
 from src.tools import register_tools
@@ -39,7 +38,7 @@ async def lifespan(mcp: FastMCP):
     # Load configuration
     config = load_config("config.yaml")
     setup_logging(config.server.log_level)
-    logger.info("Starting joern-mcp Server")
+    logger.info("Starting CodeBadger Toolkit Server")
     
     # Ensure required directories exist
     import os
@@ -56,51 +55,38 @@ async def lifespan(mcp: FastMCP):
         # Initialize services
         services['config'] = config
         services['redis'] = redis_client
-        services['session_manager'] = SessionManager(redis_client, config.sessions)
+        services['codebase_tracker'] = CodebaseTracker(redis_client)
         services['git_manager'] = GitManager(config.storage.workspace_root)
-        services['cpg_generator'] = CPGGenerator(config, services['session_manager'])
         
-        # Initialize Docker orchestrator
-        services['docker'] = DockerOrchestrator()
-        await services['docker'].initialize()
+        # Initialize CPG generator (runs Joern CLI directly in container)
+        services['cpg_generator'] = CPGGenerator(config=config)
+        # Skip initialize() - no Docker needed
         
-        # Set up Docker cleanup callback for session manager
-        services['session_manager'].set_docker_cleanup_callback(
-            services['docker'].stop_container
-        )
-        
-        # Initialize CPG generator
-        await services['cpg_generator'].initialize()
-        
-        # Initialize query executor with reference to CPG generator
+        # Initialize query executor (runs Joern servers as local subprocesses)
         services['query_executor'] = QueryExecutor(
             config.query,
             config.joern,
             redis_client,
-            services['cpg_generator']
+            docker_orchestrator=None  # Will start Joern servers directly
         )
-        
-        # Initialize query executor
-        await services['query_executor'].initialize()
+        # Skip initialize() - no Docker needed
         
         logger.info("All services initialized")
-        logger.info("joern-mcp Server is ready")
+        logger.info("CodeBadger Toolkit Server is ready")
         
         yield
         
         # Shutdown
-        logger.info("Shutting down joern-mcp Server")
+        logger.info("Shutting down CodeBadger Toolkit Server")
         
-        # Cleanup query executor sessions
-        await services['query_executor'].cleanup()
-        
-        # Cleanup Docker containers
-        await services['docker'].cleanup()
+        # Cleanup query executor (stops any running Joern server subprocesses)
+        if 'query_executor' in services:
+            await services['query_executor'].cleanup()
         
         # Close connections
         await redis_client.close()
         
-        logger.info("joern-mcp Server shutdown complete")
+        logger.info("CodeBadger Toolkit Server shutdown complete")
         
     except Exception as e:
         logger.error(f"Error during server lifecycle: {e}", exc_info=True)
@@ -109,7 +95,7 @@ async def lifespan(mcp: FastMCP):
 
 # Initialize FastMCP server
 mcp = FastMCP(
-    "joern-mcp Server",
+    "CodeBadger Toolkit Server",
     lifespan=lifespan
 )
 
@@ -123,7 +109,7 @@ async def health_check(request):
     """Health check endpoint for monitoring server status"""
     return JSONResponse({
         "status": "healthy",
-        "service": "joern-mcp-server",
+        "service": "codebadger-toolkit",
         "version": VERSION
     })
 
@@ -133,8 +119,8 @@ async def health_check(request):
 async def root(request):
     """Root endpoint providing basic server information"""
     return JSONResponse({
-        "service": "joern-mcp-server",
-        "description": "Joern MCP Server for static code analysis using Code Property Graph technology",
+        "service": "codebadger-toolkit",
+        "description": "CodeBadger Toolkit for static code analysis using Code Property Graph technology",
         "version": VERSION,
         "endpoints": {
             "health": "/health",
@@ -150,7 +136,7 @@ if __name__ == "__main__":
     host = config_data.server.host
     port = config_data.server.port
     
-    logger.info(f"Starting joern-mcp Server with HTTP transport on {host}:{port}")
+    logger.info(f"Starting CodeBadger Toolkit Server with HTTP transport on {host}:{port}")
     
     # Use HTTP transport (Streamable HTTP) for production deployment
     # This enables network accessibility, multiple concurrent clients,

@@ -2,6 +2,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/socket.h>
 
 #define likely(x) __builtin_expect((x), 1)
 
@@ -145,6 +148,122 @@ static int perform_io_operation(struct iovec *src_iov, size_t src_count, struct 
 	return safe_copy_data(src_iov, src_count, dst_iov, dst_count);
 }
 
+static char* read_user_input()
+{
+	char *buffer = malloc(256);
+	fgets(buffer, 256, stdin);
+	return buffer;
+}
+
+static char* get_environment_variable(const char *name)
+{
+	return getenv(name);
+}
+
+static int read_file_content(const char *filename, char *buffer, size_t size)
+{
+	FILE *fp = fopen(filename, "r");
+	if (!fp) return -1;
+	
+	size_t read = fread(buffer, 1, size, fp);
+	fclose(fp);
+	return read;
+}
+
+static void receive_network_data(char *buffer, size_t size)
+{
+	recv(0, buffer, size, 0);
+}
+
+static void execute_command(const char *cmd)
+{
+	system(cmd); 
+}
+
+static void write_to_memory(void *dest, const void *src, size_t n)
+{
+	memcpy(dest, src, n); 
+}
+
+static void format_string_output(const char *format)
+{
+	printf(format);
+}
+
+static int open_file_path(const char *path)
+{
+	return open(path, O_RDONLY);
+}
+
+static void sql_query(const char *query)
+{
+	printf("Executing SQL: %s\n", query);
+}
+
+static void unsafe_command_execution()
+{
+	char *user_input = read_user_input();
+	execute_command(user_input);
+	free(user_input);
+}
+
+static void unsafe_file_operation()
+{
+	char *env_var = get_environment_variable("FILE_PATH");
+	if (env_var) {
+		open_file_path(env_var);
+	}
+}
+
+static void unsafe_memory_copy()
+{
+	char network_buffer[256];
+	char local_buffer[64];
+	
+	receive_network_data(network_buffer, sizeof(network_buffer));
+	write_to_memory(local_buffer, network_buffer, 256);
+}
+
+static void unsafe_format_string()
+{
+	char file_buffer[512];
+	read_file_content("/tmp/user_data", file_buffer, sizeof(file_buffer));
+	format_string_output(file_buffer);
+}
+
+static void unsafe_sql_execution()
+{
+	char *user_input = read_user_input();
+	char query[512];
+	sprintf(query, "SELECT * FROM users WHERE name='%s'", user_input);
+	sql_query(query);
+	free(user_input);
+}
+
+static char* sanitize_input(const char *input)
+{
+	char *sanitized = malloc(strlen(input) + 1);
+	int j = 0;
+	for (int i = 0; input[i]; i++) {
+		if ((input[i] >= 'a' && input[i] <= 'z') || 
+		    (input[i] >= 'A' && input[i] <= 'Z') ||
+		    (input[i] >= '0' && input[i] <= '9')) {
+			sanitized[j++] = input[i];
+		}
+	}
+	sanitized[j] = '\0';
+	return sanitized;
+}
+
+static void safe_command_execution()
+{
+	char *user_input = read_user_input();
+	char *sanitized = sanitize_input(user_input);
+	execute_command(sanitized);
+	free(sanitized);
+	free(user_input);
+}
+
 int main()
 {
 	struct iovec src[3];
@@ -173,6 +292,8 @@ int main()
 	} else {
 		printf("Operation failed\n");
 	}
+
+	demonstrate_bounds_checking();
 
 	free(src[0].iov_base);
 	free(src[1].iov_base);

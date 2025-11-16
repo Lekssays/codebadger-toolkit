@@ -1,17 +1,18 @@
 """
-Interactive query executor for running CPGQL queries with persistent
-Joern shell in Docker containers
+Interactive query executor for running CPGQL queries using Joern server HTTP API
 """
 
 import asyncio
 import json
 import logging
+import re
+import subprocess
 import time
 import uuid
 from enum import Enum
 from typing import Any, Dict, Optional
 
-import docker
+import httpx
 
 from ..exceptions import QueryExecutionError
 from ..models import JoernConfig, QueryConfig, QueryResult
@@ -31,47 +32,145 @@ class QueryStatus(str, Enum):
 
 
 class QueryExecutor:
-    """Executes CPGQL queries using persistent Joern shells in Docker containers"""
+    """Executes CPGQL queries using Joern server HTTP API"""
 
     def __init__(
         self,
         config: QueryConfig,
         joern_config: JoernConfig,
         redis_client: Optional[RedisClient] = None,
-        cpg_generator=None,
+        docker_orchestrator=None,
     ):
         self.config = config
         self.joern_config = joern_config
         self.redis = redis_client
-        self.cpg_generator = cpg_generator
-        self.docker_client: Optional[docker.DockerClient] = None
-        self.session_containers: Dict[str, str] = {}  # session_id -> container_id
-        self.session_cpgs: Dict[str, str] = {}
-        self.session_shells: Dict[str, Any] = {}  # session_id -> persistent shell exec instance
+        # docker_orchestrator is ignored - we manage Joern servers directly
+        self.codebase_cpgs: Dict[str, str] = {}  # codebase_hash -> cpg_path
         self.query_status: Dict[str, Dict[str, Any]] = {}  # query_id -> status info
+        self.joern_servers: Dict[str, subprocess.Popen] = {}  # codebase_hash -> Joern server process
+        self.joern_ports: Dict[str, int] = {}  # codebase_hash -> port number
+        self.next_port = 2000  # Start port allocation at 2000
 
     async def initialize(self):
-        """Initialize Docker client"""
+        """Initialize QueryExecutor (no-op in container)"""
+        logger.info("QueryExecutor initialized (running locally)")
+
+    async def _start_joern_server(self, codebase_hash: str, cpg_path: str):
+        """Start a Joern server process for the given codebase"""
         try:
-            self.docker_client = docker.from_env()
-            logger.info("QueryExecutor initialized with Docker client")
+            # Allocate a port
+            port = self.next_port
+            self.next_port += 1
+            
+            # Start Joern server as subprocess
+            logger.info(f"Starting Joern server on port {port} for {cpg_path}")
+            
+            # Command: joern --server --server-port <port> --server-host 0.0.0.0
+            process = subprocess.Popen(
+                ["joern", "--server", "--server-port", str(port), "--server-host", "0.0.0.0"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            
+            # Store process and port
+            self.joern_servers[codebase_hash] = process
+            self.joern_ports[codebase_hash] = port
+            
+            # Wait for server to be ready
+            await self._wait_for_server(port, timeout=30)
+            
+            # Load CPG into server
+            await self._load_cpg(port, cpg_path)
+            
+            logger.info(f"Joern server started on port {port} for codebase {codebase_hash}")
+            
         except Exception as e:
-            logger.error(f"Failed to initialize Docker client: {e}")
-            raise QueryExecutionError(f"Docker initialization failed: {str(e)}")
+            error_msg = f"Failed to start Joern server: {str(e)}"
+            logger.error(error_msg)
+            # Cleanup on failure
+            if codebase_hash in self.joern_servers:
+                process = self.joern_servers[codebase_hash]
+                process.terminate()
+                del self.joern_servers[codebase_hash]
+            if codebase_hash in self.joern_ports:
+                del self.joern_ports[codebase_hash]
+            raise QueryExecutionError(error_msg)
 
-    def _get_joern_command(self) -> str:
-        """Get the correct joern command path"""
-        # With our updated Dockerfile, joern should be in PATH
-        # But we can also specify the full path as fallback
-        return "joern"
+    async def _wait_for_server(self, port: int, timeout: int = 30):
+        """Wait for Joern server to be ready"""
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            try:
+                async with httpx.AsyncClient() as client:
+                    # Try the /query endpoint with a simple test query
+                    response = await client.post(
+                        f"http://localhost:{port}/query",
+                        json={"query": "cpg"},
+                        timeout=5.0
+                    )
+                    # If we get any response (200, 40x, etc.), server is ready
+                    if response.status_code in [200, 400, 404]:
+                        logger.info(f"Joern server on port {port} is ready")
+                        return
+            except Exception as e:
+                # Server not ready yet
+                logger.debug(f"Waiting for server on port {port}: {e}")
+            await asyncio.sleep(1)
+        
+        raise QueryExecutionError(f"Joern server on port {port} did not start within {timeout}s")
 
-    def set_cpg_generator(self, cpg_generator):
-        """Set reference to CPG generator"""
-        self.cpg_generator = cpg_generator
+    async def _load_cpg(self, port: int, cpg_path: str):
+        """Load CPG into Joern server"""
+        try:
+            logger.info(f"Loading CPG {cpg_path} into Joern server on port {port}")
+            
+            # Use Joern HTTP API to load CPG
+            # POST /query with importCpg command
+            query = f'importCpg("{cpg_path}")'
+            
+            async with httpx.AsyncClient(timeout=300.0) as client:
+                # Submit query
+                response = await client.post(
+                    f"http://localhost:{port}/query",
+                    json={"query": query}
+                )
+                
+                if response.status_code != 200:
+                    raise QueryExecutionError(f"Failed to load CPG: HTTP {response.status_code}")
+                
+                result = response.json()
+                query_uuid = result.get("uuid")
+                
+                if not query_uuid:
+                    raise QueryExecutionError("Server did not return query UUID")
+                
+                # Wait for result
+                for _ in range(60):  # Wait up to 60 seconds
+                    await asyncio.sleep(1)
+                    result_response = await client.get(
+                        f"http://localhost:{port}/result/{query_uuid}"
+                    )
+                    
+                    if result_response.status_code == 200:
+                        result_data = result_response.json()
+                        if result_data.get("success"):
+                            logger.info(f"CPG loaded successfully into server on port {port}")
+                            return
+                        else:
+                            error = result_data.get("stderr", "Unknown error")
+                            raise QueryExecutionError(f"Failed to load CPG: {error}")
+                
+                raise QueryExecutionError("CPG loading timed out")
+            
+        except Exception as e:
+            error_msg = f"Failed to load CPG: {str(e)}"
+            logger.error(error_msg)
+            raise QueryExecutionError(error_msg)
 
     async def execute_query_async(
         self,
-        session_id: str,
+        codebase_hash: str,
         query: str,
         timeout: Optional[int] = None,
         limit: Optional[int] = 150,
@@ -95,7 +194,7 @@ class QueryExecutor:
             # Initialize query status
             self.query_status[query_id] = {
                 "status": QueryStatus.PENDING.value,
-                "session_id": session_id,
+                "codebase_hash": codebase_hash,
                 "query": query,
                 "output_file": output_file,
                 "created_at": time.time(),
@@ -105,11 +204,11 @@ class QueryExecutor:
             # Start async execution
             asyncio.create_task(
                 self._execute_query_background(
-                    query_id, session_id, query_with_pipe, timeout
+                    query_id, codebase_hash, query_with_pipe, timeout
                 )
             )
 
-            logger.info(f"Started async query {query_id} for session {session_id}")
+            logger.info(f"Started async query {query_id} for codebase {codebase_hash}")
             return query_id
 
         except Exception as e:
@@ -119,7 +218,7 @@ class QueryExecutor:
     async def _execute_query_background(
         self,
         query_id: str,
-        session_id: str,
+        codebase_hash: str,
         query_with_pipe: str,
         timeout: Optional[int],
     ):
@@ -135,9 +234,9 @@ class QueryExecutor:
             # Check cache if enabled
             if self.config.cache_enabled and self.redis:
                 query_hash_val = hash_query(query_normalized)
-                cached = await self.redis.get_cached_query(session_id, query_hash_val)
+                cached = await self.redis.get_cached_query(codebase_hash, query_hash_val)
                 if cached:
-                    logger.info(f"Query cache hit for session {session_id}")
+                    logger.info(f"Query cache hit for session {codebase_hash}")
                     # Update status to completed with cached result
                     self.query_status[query_id]["status"] = QueryStatus.COMPLETED.value
                     self.query_status[query_id]["completed_at"] = time.time()
@@ -146,7 +245,7 @@ class QueryExecutor:
 
             # Execute query using the same approach as sync queries
             result = await self._execute_query_in_shell(
-                session_id, query_normalized, timeout or self.config.timeout
+                codebase_hash, query_normalized, timeout or self.config.timeout
             )
 
             if result.success:
@@ -159,7 +258,7 @@ class QueryExecutor:
                 if self.config.cache_enabled and self.redis:
                     query_hash_val = hash_query(query_normalized)
                     await self.redis.cache_query_result(
-                        session_id,
+                        codebase_hash,
                         query_hash_val,
                         result.to_dict(),
                         self.config.cache_ttl,
@@ -226,55 +325,24 @@ class QueryExecutor:
                 success=True, data=[], row_count=0, execution_time=execution_time
             )
 
-    async def _get_container_id(self, session_id: str) -> Optional[str]:
-        """Get container ID for session"""
-        if self.cpg_generator:
-            container_id = await self.cpg_generator.get_container_id(session_id)
-            logger.debug(
-                f"Got container ID from CPG generator for session {session_id}: "
-                f"{container_id}"
-            )
-            return container_id
-        container_id = self.session_containers.get(session_id)
-        logger.debug(
-            f"Got container ID from local cache for session {session_id}: "
-            f"{container_id}"
-        )
-        return container_id
 
-    async def _read_file_from_container(self, session_id: str, file_path: str) -> str:
-        """Read file content from Docker container"""
-        container_id = await self._get_container_id(session_id)
-        if not container_id:
-            raise QueryExecutionError(f"No container found for session {session_id}")
-
-        try:
-            container = self.docker_client.containers.get(container_id)
-            result = container.exec_run(f"cat {file_path}")
-
-            if result.exit_code == 0:
-                return result.output.decode("utf-8", errors="ignore")
-            else:
-                raise QueryExecutionError(
-                    f"Failed to read file {file_path}: exit code {result.exit_code}"
-                )
-
-        except Exception as e:
-            raise QueryExecutionError(f"Failed to read file {file_path}: {str(e)}")
 
     async def execute_query(
         self,
-        session_id: str,
+        codebase_hash: str,
         cpg_path: str,
         query: str,
         timeout: Optional[int] = None,
         limit: Optional[int] = 150,
         offset: Optional[int] = None,
     ) -> QueryResult:
-        """Execute a CPGQL query synchronously (for backwards compatibility)"""
+        """Execute a CPGQL query using Joern server HTTP API"""
         start_time = time.time()
 
         try:
+            # Store CPG path for this codebase
+            self.codebase_cpgs[codebase_hash] = cpg_path
+            
             # Validate query
             validate_cpgql_query(query)
 
@@ -286,22 +354,27 @@ class QueryExecutor:
             # Check cache if enabled
             if self.config.cache_enabled and self.redis:
                 query_hash_val = hash_query(query_normalized)
-                cached = await self.redis.get_cached_query(session_id, query_hash_val)
+                cached = await self.redis.get_cached_query(codebase_hash, query_hash_val)
                 if cached:
-                    logger.info(f"Query cache hit for session {session_id}")
+                    logger.info(f"Query cache hit for codebase {codebase_hash}")
                     cached["execution_time"] = time.time() - start_time
                     return QueryResult(**cached)
 
-            # Use container CPG path consistently
-            container_cpg_path = "/workspace/cpg.bin"
+            # Get or start Joern server for this codebase
+            if codebase_hash not in self.joern_servers:
+                # Start a Joern server for this codebase
+                logger.info(f"Starting Joern server for codebase {codebase_hash}")
+                await self._start_joern_server(codebase_hash, cpg_path)
+            
+            # Get port for this codebase
+            port = self.joern_ports.get(codebase_hash)
+            if not port:
+                raise QueryExecutionError(f"No Joern server found for codebase {codebase_hash}")
 
-            # Ensure CPG is loaded in session
-            await self._ensure_cpg_loaded(session_id, container_cpg_path)
-
-            # Execute query
+            # Execute query via HTTP API
             timeout_val = timeout or self.config.timeout
-            result = await self._execute_query_in_shell(
-                session_id, query_normalized, timeout_val
+            result = await self._execute_query_via_http(
+                port, query_normalized, timeout_val
             )
             result.execution_time = time.time() - start_time
 
@@ -309,11 +382,11 @@ class QueryExecutor:
             if self.config.cache_enabled and self.redis and result.success:
                 query_hash_val = hash_query(query_normalized)
                 await self.redis.cache_query_result(
-                    session_id, query_hash_val, result.to_dict(), self.config.cache_ttl
+                    codebase_hash, query_hash_val, result.to_dict(), self.config.cache_ttl
                 )
 
             logger.info(
-                f"Query executed for session {session_id}: "
+                f"Query executed for session {codebase_hash}: "
                 f"{result.row_count} rows in {result.execution_time:.2f}s"
             )
 
@@ -333,13 +406,13 @@ class QueryExecutor:
                 execution_time=time.time() - start_time,
             )
 
-    async def list_queries(self, session_id: Optional[str] = None) -> Dict[str, Any]:
+    async def list_queries(self, codebase_hash: Optional[str] = None) -> Dict[str, Any]:
         """List all queries or queries for a specific session"""
-        if session_id:
+        if codebase_hash:
             return {
                 query_id: status_info
                 for query_id, status_info in self.query_status.items()
-                if status_info["session_id"] == session_id
+                if status_info["codebase_hash"] == codebase_hash
             }
         else:
             return self.query_status.copy()
@@ -352,11 +425,11 @@ class QueryExecutor:
             # Clean up output file if it exists
             if "output_file" in status_info:
                 try:
-                    session_id = status_info["session_id"]
+                    codebase_hash = status_info["codebase_hash"]
                     output_file = status_info["output_file"]
 
                     # Execute rm command in container to clean up file
-                    container_id = await self._get_container_id(session_id)
+                    container_id = await self._get_container_id(codebase_hash)
                     if container_id:
                         container = self.docker_client.containers.get(container_id)
                         container.exec_run(f"rm -f {output_file}")
@@ -440,145 +513,149 @@ class QueryExecutor:
         # Add .toJsonPretty for proper JSON output
         return query + ".toJsonPretty"
 
-    async def _ensure_cpg_loaded(self, session_id: str, cpg_path: str):
-        """Ensure CPG is loaded in the Joern session"""
-        # Load CPG if not already loaded or if different CPG
-        current_cpg = self.session_cpgs.get(session_id)
-        if current_cpg != cpg_path:
-            await self._load_cpg_in_container(session_id, cpg_path)
-            self.session_cpgs[session_id] = cpg_path
-
-    async def _load_cpg_in_container(self, session_id: str, cpg_path: str):
-        """Load CPG in the container using direct joern command"""
-        logger.info(f"Loading CPG for session {session_id}: {cpg_path}")
-
-        container_id = await self._get_container_id(session_id)
-        if not container_id:
-            logger.error(f"No container found for session {session_id}")
-            raise QueryExecutionError(
-                f"No container found for session {session_id}"
-            )
-
-        logger.info(
-            f"Loading CPG {cpg_path} in container {
-                container_id} for session {session_id}"
-        )
-
+    async def _execute_query_via_http(
+        self, port: int, query: str, timeout: int
+    ) -> QueryResult:
+        """Execute query using Joern server HTTP API"""
         try:
-            # Start Joern shell and load CPG in one command
-            container = self.docker_client.containers.get(container_id)
-            joern_cmd = self._get_joern_command()
-
-            # Create a simple script to load CPG
-            script_content = f"""#!/bin/bash
-echo 'importCpg("{cpg_path}")' | {joern_cmd}
-"""
-
-            # Write script to container using a simpler approach
-            script_result = container.exec_run(
-                [
-                    "sh",
-                    "-c",
-                    f"cat > /tmp/load_cpg.sh << 'EOF'\n{
-                        script_content}EOF\nchmod +x /tmp/load_cpg.sh",
-                ]
-            )
-
-            if script_result.exit_code != 0:
-                error_output = (
-                    script_result.output.decode("utf-8", errors="ignore")
-                    if script_result.output
-                    else "No output"
-                )
-                logger.error(f"Failed to create CPG loading script: {error_output}")
-                raise QueryExecutionError(
-                    f"Failed to create CPG loading script: {error_output}"
-                )
-
-            # Execute the script and treat Joern warnings as non-fatal
-            load_result = container.exec_run(["/bin/bash", "/tmp/load_cpg.sh"])
-
-            output = (
-                load_result.output.decode("utf-8", errors="ignore")
-                if load_result.output
-                else ""
-            )
-
-            # Known non-fatal warning patterns from Joern/overlays
-            non_fatal_patterns = [
-                "FieldAccessLinkerPass",
-                "ReachingDefPass",
-                "The graph has been modified",
-                "Skipping.",
-                "WARN",
-            ]
-
-            # If exit code is non-zero, check whether output only contains
-            # non-fatal warnings. If there are other messages, treat as fatal.
-            if load_result.exit_code != 0:
-                # If every non-empty line contains at least one non-fatal token,
-                # consider it a warning-only failure and proceed.
-                lines = [l.strip() for l in output.splitlines() if l.strip()]
-                if lines:
-                    fatal_lines = [
-                        l
-                        for l in lines
-                        if not any(tok in l for tok in non_fatal_patterns)
-                    ]
-                    if fatal_lines:
-                        logger.error(
-                            f"Failed to load CPG (fatal): exit {load_result.exit_code}: {output}"
-                        )
-                        raise QueryExecutionError(
-                            f"Failed to load CPG: exit {load_result.exit_code}: {output}"
-                        )
-                    else:
-                        # Only warnings found; log and continue
-                        logger.warning(
-                            f"CPG load returned non-zero exit but only warnings: {output[:1000]}"
-                        )
-                else:
-                    # No output but non-zero exit - treat as fatal
-                    logger.error(
-                        f"Failed to load CPG: exit {load_result.exit_code} with no output"
-                    )
-                    raise QueryExecutionError(
-                        f"Failed to load CPG: exit {load_result.exit_code} with no output"
-                    )
-
-            logger.info(f"CPG loaded (or warnings only) for session {session_id}")
+            logger.debug(f"Executing query via HTTP on port {port}: {query[:100]}...")
             
-            # Note: Joern automatically caches loaded CPGs in workspace
-            # Subsequent queries will be faster as overlays are already applied
-
+            # Execute query via Joern HTTP API
+            async with httpx.AsyncClient(timeout=float(timeout)) as client:
+                # Submit query
+                response = await client.post(
+                    f"http://localhost:{port}/query",
+                    json={"query": query}
+                )
+                
+                if response.status_code != 200:
+                    error_msg = f"HTTP {response.status_code}"
+                    logger.error(f"Query failed: {error_msg}")
+                    return QueryResult(success=False, error=error_msg)
+                
+                result = response.json()
+                query_uuid = result.get("uuid")
+                
+                if not query_uuid:
+                    return QueryResult(success=False, error="Server did not return query UUID")
+                
+                # Poll for result
+                start_time = time.time()
+                while time.time() - start_time < timeout:
+                    await asyncio.sleep(0.5)
+                    
+                    result_response = await client.get(
+                        f"http://localhost:{port}/result/{query_uuid}"
+                    )
+                    
+                    if result_response.status_code == 200:
+                        result_data = result_response.json()
+                        success = result_data.get("success")
+                        stdout = result_data.get("stdout", "")
+                        stderr = result_data.get("stderr", "")
+                        
+                        if success:
+                            # Try to parse stdout as JSON
+                            data = self._parse_joern_output(stdout)
+                            return QueryResult(success=True, data=data, row_count=len(data))
+                        else:
+                            # Query failed
+                            error_msg = stderr if stderr else "Query failed"
+                            logger.error(f"Query failed: {error_msg}")
+                            return QueryResult(success=False, error=error_msg)
+                
+                # Timeout
+                return QueryResult(success=False, error=f"Query timeout after {timeout}s")
+                
+        except asyncio.TimeoutError as e:
+            logger.error(f"Query timeout: {e}")
+            return QueryResult(success=False, error=f"Query timeout: {str(e)}")
         except Exception as e:
-            logger.error(f"Failed to load CPG in container: {e}")
-            raise QueryExecutionError(f"Failed to load CPG: {str(e)}")
+            logger.error(f"Error executing query via HTTP: {e}")
+            return QueryResult(success=False, error=str(e))
+
+    def _parse_joern_output(self, output: str) -> list:
+        """Parse Joern query output, extracting JSON from Scala REPL format"""
+        if not output or not output.strip():
+            return []
+        
+        # Remove ANSI color codes
+        import re
+        ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+        output = ansi_escape.sub('', output)
+        
+        # Try to extract JSON from Scala REPL output
+        # Format: val res0: String = """[...]"""
+        # or: val res0: List[...] = List(...)
+        
+        # Look for JSON array or object within triple quotes
+        match = re.search(r'"""(\[.*?\]|\{.*?\})"""', output, re.DOTALL)
+        if match:
+            json_str = match.group(1)
+            try:
+                data = json.loads(json_str)
+                if isinstance(data, dict):
+                    return [data]
+                elif isinstance(data, list):
+                    return data
+                else:
+                    return [{"value": str(data)}]
+            except json.JSONDecodeError as e:
+                logger.debug(f"Failed to parse extracted JSON: {e}")
+        
+        # Try direct JSON parsing (for when output is already clean JSON)
+        try:
+            data = json.loads(output)
+            if isinstance(data, dict):
+                return [data]
+            elif isinstance(data, list):
+                return data
+            else:
+                return [{"value": str(data)}]
+        except json.JSONDecodeError:
+            # If not JSON, return as plain text
+            logger.debug("Output is not JSON, returning as plain text")
+            return [{"value": output.strip()}]
+
+    async def _ensure_cpg_loaded(self, codebase_hash: str, cpg_path: str):
+        """Ensure CPG is loaded in the Joern session (DEPRECATED)"""
+        # This method is deprecated in the new architecture
+        # CPG loading is handled by docker_orchestrator when starting the server
+        logger.debug(f"_ensure_cpg_loaded called for session {codebase_hash} (deprecated)")
+        pass
+
+    async def _load_cpg_in_container(self, codebase_hash: str, cpg_path: str):
+        """Load CPG in the container (DEPRECATED - handled by docker_orchestrator)"""
+        logger.debug(f"_load_cpg_in_container called for session {codebase_hash} (deprecated)")
+        # This is now handled by docker_orchestrator.start_joern_server
+        pass
 
     async def _execute_query_in_shell(
-        self, session_id: str, query: str, timeout: int
+        self, codebase_hash: str, query: str, timeout: int
     ) -> QueryResult:
-        """Execute query using Joern project caching (fast after first load)"""
-        logger.debug(f"Executing query in session {session_id}: {query[:100]}...")
+        """Execute query (DEPRECATED - use _execute_query_via_http)"""
+        logger.warning("_execute_query_in_shell is deprecated")
+        # Get client and use HTTP API
+        if not self.docker_orchestrator:
+            raise QueryExecutionError("Docker orchestrator not initialized")
+        
+        client = await self.docker_orchestrator.get_joern_client(codebase_hash)
+        if not client:
+            raise QueryExecutionError(f"No Joern server found for codebase {codebase_hash}")
+        
+        return await self._execute_query_via_http(client, query, timeout)
 
-        container_id = await self._get_container_id(session_id)
-        if not container_id:
-            raise QueryExecutionError(f"No container found for session {session_id}")
-
-        # Always use project-based execution (Joern caches loaded CPG)
-        return await self._execute_query_via_persistent_shell(session_id, query, timeout)
-
-    async def _execute_query_via_persistent_shell(
-        self, session_id: str, query: str, timeout: int
+    async def _execute_query_via_persistent_shell_DEPRECATED(
+        self, codebase_hash: str, query: str, timeout: int
     ) -> QueryResult:
         """Execute query using Joern project (reuses loaded CPG - fast path)"""
-        logger.info(f"Executing query via Joern project (session {session_id})")
+        logger.info(f"Executing query via Joern project (session {codebase_hash})")
         
-        container_id = await self._get_container_id(session_id)
+        container_id = await self._get_container_id(codebase_hash)
         container = self.docker_client.containers.get(container_id)
         
         query_id = str(uuid.uuid4())[:8]
-        cpg_path = self.session_cpgs.get(session_id, "/workspace/cpg.bin")
+        cpg_path = self.codebase_cpgs.get(codebase_hash, "/workspace/cpg.bin")
         
         try:
             # Create query script file
@@ -710,15 +787,15 @@ exit $EXIT_CODE
             logger.error(f"Error executing query: {e}")
             return QueryResult(success=False, error=str(e))
 
-    async def _execute_query_oneshot(
-        self, session_id: str, query: str, timeout: int
+    async def _execute_query_oneshot_DEPRECATED(
+        self, codebase_hash: str, query: str, timeout: int
     ) -> QueryResult:
         """Execute query using one-shot joern process (slow but reliable fallback)"""
-        logger.debug(f"Executing query via one-shot execution in session {session_id}: {query[:100]}...")
+        logger.debug(f"Executing query via one-shot execution in session {codebase_hash}: {query[:100]}...")
 
-        container_id = await self._get_container_id(session_id)
+        container_id = await self._get_container_id(codebase_hash)
         if not container_id:
-            raise QueryExecutionError(f"No container found for session {session_id}")
+            raise QueryExecutionError(f"No container found for session {codebase_hash}")
 
         try:
             container = self.docker_client.containers.get(container_id)
@@ -856,29 +933,37 @@ exit $EXIT_CODE
             logger.error(f"Error executing query in container: {e}")
             return QueryResult(success=False, error=f"Query execution error: {str(e)}")
 
-    async def close_session(self, session_id: str):
-        """Close query executor session resources"""
-        if session_id in self.session_cpgs:
-            del self.session_cpgs[session_id]
+    async def close_session(self, codebase_hash: str):
+        """Close query executor codebase resources"""
+        if codebase_hash in self.codebase_cpgs:
+            del self.codebase_cpgs[codebase_hash]
 
-        # Remove from container mapping if present
-        if session_id in self.session_containers:
-            del self.session_containers[session_id]
-        
-        # Clean up shell tracking if present (though we don't use FIFOs anymore)
-        if session_id in self.session_shells:
-            del self.session_shells[session_id]
-
-        logger.info(f"Closed query executor resources for session {session_id}")
+        logger.info(f"Closed query executor resources for codebase {codebase_hash}")
 
     async def cleanup(self):
-        """Cleanup all sessions and queries"""
+        """Cleanup all codebases and queries"""
         # Cleanup all queries
         query_ids = list(self.query_status.keys())
         for query_id in query_ids:
             await self.cleanup_query(query_id)
 
-        # Cleanup session resources
-        sessions = list(self.session_cpgs.keys())
-        for session_id in sessions:
-            await self.close_session(session_id)
+        # Terminate all Joern server processes
+        for codebase_hash, process in self.joern_servers.items():
+            try:
+                logger.info(f"Terminating Joern server for codebase {codebase_hash}")
+                process.terminate()
+                process.wait(timeout=5)
+            except Exception as e:
+                logger.warning(f"Error terminating Joern server: {e}")
+                try:
+                    process.kill()
+                except:
+                    pass
+        
+        self.joern_servers.clear()
+        self.joern_ports.clear()
+
+        # Cleanup codebase resources
+        codebases = list(self.codebase_cpgs.keys())
+        for codebase_hash in codebases:
+            await self.close_session(codebase_hash)

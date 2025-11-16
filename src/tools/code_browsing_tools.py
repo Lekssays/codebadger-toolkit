@@ -1,5 +1,5 @@
 """
-Code Browsing MCP Tools for Joern MCP Server
+Code Browsing MCP Tools for CodeBadger Toolkit Server
 Tools for exploring and navigating codebase structure
 """
 
@@ -9,12 +9,9 @@ import re
 from typing import Any, Dict, Optional
 
 from ..exceptions import (
-    SessionNotFoundError,
-    SessionNotReadyError,
-    ValidationError,
+            ValidationError,
 )
-from ..models import SessionStatus
-from ..utils.validators import validate_session_id
+from ..utils.validators import validate_codebase_hash
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +22,7 @@ def register_code_browsing_tools(mcp, services: dict):
 
     @mcp.tool()
     async def list_methods(
-        session_id: str,
+        codebase_hash: str,
         name_pattern: Optional[str] = None,
         file_pattern: Optional[str] = None,
         callee_pattern: Optional[str] = None,
@@ -40,7 +37,7 @@ def register_code_browsing_tools(mcp, services: dict):
         functions to analyze.
 
         Args:
-            session_id: The session ID from create_cpg_session
+            codebase_hash: The session ID from create_cpg_session
             name_pattern: Optional regex to filter method names (e.g., ".*authenticate.*")
             file_pattern: Optional regex to filter by file path
             callee_pattern: Optional regex to filter for methods that call a specific function
@@ -61,19 +58,15 @@ def register_code_browsing_tools(mcp, services: dict):
             }
         """
         try:
-            validate_session_id(session_id)
+            validate_codebase_hash(codebase_hash)
 
-            session_manager = services["session_manager"]
+            codebase_tracker = services["codebase_tracker"]
             query_executor = services["query_executor"]
 
-            session = await session_manager.get_session(session_id)
-            if not session:
-                raise SessionNotFoundError(f"Session {session_id} not found")
-
-            if session.status != SessionStatus.READY.value:
-                raise SessionNotReadyError(f"Session is in '{session.status}' status")
-
-            await session_manager.touch_session(session_id)
+            # Verify CPG exists for this codebase
+            codebase_info = await codebase_tracker.get_codebase(codebase_hash)
+            if not codebase_info or not codebase_info.cpg_path:
+                raise ValidationError(f"CPG not found for codebase {codebase_hash}. Generate it first using generate_cpg.")
 
             # Build query with filters
             query_parts = ["cpg.method"]
@@ -99,8 +92,8 @@ def register_code_browsing_tools(mcp, services: dict):
             logger.info(f"list_methods query: {query}")
 
             result = await query_executor.execute_query(
-                session_id=session_id,
-                cpg_path="/workspace/cpg.bin",
+                codebase_hash=codebase_hash,
+                cpg_path=codebase_info.cpg_path,
                 query=query,
                 timeout=30,
                 limit=limit,
@@ -132,7 +125,7 @@ def register_code_browsing_tools(mcp, services: dict):
 
             return {"success": True, "methods": methods, "total": len(methods)}
 
-        except (SessionNotFoundError, SessionNotReadyError, ValidationError) as e:
+        except (ValidationError, ValidationError, ValidationError) as e:
             logger.error(f"Error listing methods: {e}")
             return {
                 "success": False,
@@ -147,7 +140,7 @@ def register_code_browsing_tools(mcp, services: dict):
 
     @mcp.tool()
     async def get_method_source(
-        session_id: str, method_name: str, filename: Optional[str] = None
+        codebase_hash: str, method_name: str, filename: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Get the source code of a specific method.
@@ -156,7 +149,7 @@ def register_code_browsing_tools(mcp, services: dict):
         Useful when you need to examine the details of a specific function.
 
         Args:
-            session_id: The session ID from create_cpg_session
+            codebase_hash: The session ID from create_cpg_session
             method_name: Name of the method (can be regex pattern)
             filename: Optional filename to disambiguate methods with same name
 
@@ -176,19 +169,15 @@ def register_code_browsing_tools(mcp, services: dict):
             }
         """
         try:
-            validate_session_id(session_id)
+            validate_codebase_hash(codebase_hash)
 
-            session_manager = services["session_manager"]
+            codebase_tracker = services["codebase_tracker"]
             query_executor = services["query_executor"]
 
-            session = await session_manager.get_session(session_id)
-            if not session:
-                raise SessionNotFoundError(f"Session {session_id} not found")
-
-            if session.status != SessionStatus.READY.value:
-                raise SessionNotReadyError(f"Session is in '{session.status}' status")
-
-            await session_manager.touch_session(session_id)
+            # Verify CPG exists for this codebase
+            codebase_info = await codebase_tracker.get_codebase(codebase_hash)
+            if not codebase_info or not codebase_info.cpg_path:
+                raise ValidationError(f"CPG not found for codebase {codebase_hash}. Generate it first using generate_cpg.")
 
             # Build query to get method metadata
             query_parts = [f'cpg.method.name("{method_name}")']
@@ -202,8 +191,8 @@ def register_code_browsing_tools(mcp, services: dict):
             query = "".join(query_parts) + ".toJsonPretty"
 
             result = await query_executor.execute_query(
-                session_id=session_id,
-                cpg_path="/workspace/cpg.bin",
+                codebase_hash=codebase_hash,
+                cpg_path=codebase_info.cpg_path,
                 query=query,
                 timeout=30,
                 limit=10,
@@ -239,18 +228,18 @@ def register_code_browsing_tools(mcp, services: dict):
                     )
 
                     # Get source directory from session
-                    if session.source_type == "github":
+                    if codebase_info.source_type == "github":
                         # For GitHub repos, use the cached directory
                         from .core_tools import get_cpg_cache_key
                         cpg_cache_key = get_cpg_cache_key(
-                            session.source_type, session.source_path, session.language
+                            codebase_info.source_type, codebase_info.source_path, codebase_info.language
                         )
                         source_dir = os.path.join(
                             playground_path, "codebases", cpg_cache_key
                         )
                     else:
                         # For local paths, use the session source path directly
-                        source_path = session.source_path
+                        source_path = codebase_info.source_path
                         if not os.path.isabs(source_path):
                             source_path = os.path.abspath(source_path)
                         source_dir = source_path
@@ -297,7 +286,7 @@ def register_code_browsing_tools(mcp, services: dict):
 
             return {"success": True, "methods": methods, "total": len(methods)}
 
-        except (SessionNotFoundError, SessionNotReadyError, ValidationError) as e:
+        except (ValidationError, ValidationError, ValidationError) as e:
             logger.error(f"Error getting method source: {e}")
             return {
                 "success": False,
@@ -312,7 +301,7 @@ def register_code_browsing_tools(mcp, services: dict):
 
     @mcp.tool()
     async def list_calls(
-        session_id: str,
+        codebase_hash: str,
         caller_pattern: Optional[str] = None,
         callee_pattern: Optional[str] = None,
         limit: int = 100,
@@ -324,7 +313,7 @@ def register_code_browsing_tools(mcp, services: dict):
         control flow and dependencies in the code.
 
         Args:
-            session_id: The session ID from create_cpg_session
+            codebase_hash: The session ID from create_cpg_session
             caller_pattern: Optional regex to filter caller method names
             callee_pattern: Optional regex to filter callee method names
             limit: Maximum number of results (default: 100)
@@ -345,19 +334,15 @@ def register_code_browsing_tools(mcp, services: dict):
             }
         """
         try:
-            validate_session_id(session_id)
+            validate_codebase_hash(codebase_hash)
 
-            session_manager = services["session_manager"]
+            codebase_tracker = services["codebase_tracker"]
             query_executor = services["query_executor"]
 
-            session = await session_manager.get_session(session_id)
-            if not session:
-                raise SessionNotFoundError(f"Session {session_id} not found")
-
-            if session.status != SessionStatus.READY.value:
-                raise SessionNotReadyError(f"Session is in '{session.status}' status")
-
-            await session_manager.touch_session(session_id)
+            # Verify CPG exists for this codebase
+            codebase_info = await codebase_tracker.get_codebase(codebase_hash)
+            if not codebase_info or not codebase_info.cpg_path:
+                raise ValidationError(f"CPG not found for codebase {codebase_hash}. Generate it first using generate_cpg.")
 
             # Build query
             query_parts = ["cpg.call"]
@@ -377,8 +362,8 @@ def register_code_browsing_tools(mcp, services: dict):
             logger.info(f"list_calls query: {query}")
 
             result = await query_executor.execute_query(
-                session_id=session_id,
-                cpg_path="/workspace/cpg.bin",
+                codebase_hash=codebase_hash,
+                cpg_path=codebase_info.cpg_path,
                 query=query,
                 timeout=30,
                 limit=limit,
@@ -405,7 +390,7 @@ def register_code_browsing_tools(mcp, services: dict):
 
             return {"success": True, "calls": calls, "total": len(calls)}
 
-        except (SessionNotFoundError, SessionNotReadyError, ValidationError) as e:
+        except (ValidationError, ValidationError, ValidationError) as e:
             logger.error(f"Error listing calls: {e}")
             return {
                 "success": False,
@@ -420,7 +405,7 @@ def register_code_browsing_tools(mcp, services: dict):
 
     @mcp.tool()
     async def get_call_graph(
-        session_id: str, method_name: str, depth: int = 5, direction: str = "outgoing"
+        codebase_hash: str, method_name: str, depth: int = 5, direction: str = "outgoing"
     ) -> Dict[str, Any]:
         """
         Get the call graph for a specific method.
@@ -430,7 +415,7 @@ def register_code_browsing_tools(mcp, services: dict):
         code dependencies.
 
         Args:
-            session_id: The session ID from create_cpg_session
+            codebase_hash: The session ID from create_cpg_session
             method_name: Name of the method to analyze (can be regex)
             depth: How many levels deep to traverse (default: 5, max recommended: 10)
             direction: "outgoing" (callees) or "incoming" (callers)
@@ -448,7 +433,7 @@ def register_code_browsing_tools(mcp, services: dict):
             }
         """
         try:
-            validate_session_id(session_id)
+            validate_codebase_hash(codebase_hash)
 
             if depth < 1 and depth > 15:
                 raise ValidationError("Depth must be at least 1")
@@ -456,17 +441,13 @@ def register_code_browsing_tools(mcp, services: dict):
             if direction not in ["outgoing", "incoming"]:
                 raise ValidationError("Direction must be 'outgoing' or 'incoming'")
 
-            session_manager = services["session_manager"]
+            codebase_tracker = services["codebase_tracker"]
             query_executor = services["query_executor"]
 
-            session = await session_manager.get_session(session_id)
-            if not session:
-                raise SessionNotFoundError(f"Session {session_id} not found")
-
-            if session.status != SessionStatus.READY.value:
-                raise SessionNotReadyError(f"Session is in '{session.status}' status")
-
-            await session_manager.touch_session(session_id)
+            # Verify CPG exists for this codebase
+            codebase_info = await codebase_tracker.get_codebase(codebase_hash)
+            if not codebase_info or not codebase_info.cpg_path:
+                raise ValidationError(f"CPG not found for codebase {codebase_hash}. Generate it first using generate_cpg.")
 
             # Build query based on direction
             # Escape the method name for regex matching
@@ -556,8 +537,8 @@ if (targetMethod.nonEmpty) {{
 }}.toJsonPretty"""
 
             result = await query_executor.execute_query(
-                session_id=session_id,
-                cpg_path="/workspace/cpg.bin",
+                codebase_hash=codebase_hash,
+                cpg_path=codebase_info.cpg_path,
                 query=query,
                 timeout=120,
                 limit=500,
@@ -588,7 +569,7 @@ if (targetMethod.nonEmpty) {{
                 "total": len(calls),
             }
 
-        except (SessionNotFoundError, SessionNotReadyError, ValidationError) as e:
+        except (ValidationError, ValidationError, ValidationError) as e:
             logger.error(f"Error getting call graph: {e}")
             return {
                 "success": False,
@@ -602,7 +583,7 @@ if (targetMethod.nonEmpty) {{
             }
 
     @mcp.tool()
-    async def list_parameters(session_id: str, method_name: str) -> Dict[str, Any]:
+    async def list_parameters(codebase_hash: str, method_name: str) -> Dict[str, Any]:
         """
         List parameters of a specific method.
 
@@ -610,7 +591,7 @@ if (targetMethod.nonEmpty) {{
         types, and order. Useful for understanding function signatures.
 
         Args:
-            session_id: The session ID from create_cpg_session
+            codebase_hash: The session ID from create_cpg_session
             method_name: Name of the method (can be regex pattern)
 
         Returns:
@@ -629,19 +610,15 @@ if (targetMethod.nonEmpty) {{
             }
         """
         try:
-            validate_session_id(session_id)
+            validate_codebase_hash(codebase_hash)
 
-            session_manager = services["session_manager"]
+            codebase_tracker = services["codebase_tracker"]
             query_executor = services["query_executor"]
 
-            session = await session_manager.get_session(session_id)
-            if not session:
-                raise SessionNotFoundError(f"Session {session_id} not found")
-
-            if session.status != SessionStatus.READY.value:
-                raise SessionNotReadyError(f"Session is in '{session.status}' status")
-
-            await session_manager.touch_session(session_id)
+            # Verify CPG exists for this codebase
+            codebase_info = await codebase_tracker.get_codebase(codebase_hash)
+            if not codebase_info or not codebase_info.cpg_path:
+                raise ValidationError(f"CPG not found for codebase {codebase_hash}. Generate it first using generate_cpg.")
 
             query = (
                 f'cpg.method.name("{
@@ -650,8 +627,8 @@ if (targetMethod.nonEmpty) {{
             )
 
             result = await query_executor.execute_query(
-                session_id=session_id,
-                cpg_path="/workspace/cpg.bin",
+                codebase_hash=codebase_hash,
+                cpg_path=codebase_info.cpg_path,
                 query=query,
                 timeout=30,
                 limit=10,
@@ -683,7 +660,7 @@ if (targetMethod.nonEmpty) {{
 
             return {"success": True, "methods": methods, "total": len(methods)}
 
-        except (SessionNotFoundError, SessionNotReadyError, ValidationError) as e:
+        except (ValidationError, ValidationError, ValidationError) as e:
             logger.error(f"Error listing parameters: {e}")
             return {
                 "success": False,
@@ -698,7 +675,7 @@ if (targetMethod.nonEmpty) {{
 
     @mcp.tool()
     async def find_literals(
-        session_id: str,
+        codebase_hash: str,
         pattern: Optional[str] = None,
         literal_type: Optional[str] = None,
         limit: int = 50,
@@ -711,7 +688,7 @@ if (targetMethod.nonEmpty) {{
         magic numbers in the code.
 
         Args:
-            session_id: The session ID from create_cpg_session
+            codebase_hash: The session ID from create_cpg_session
             pattern: Optional regex to filter literal values (e.g., ".*password.*")
             literal_type: Optional type filter (e.g., "string", "int")
             limit: Maximum number of results (default: 50)
@@ -732,19 +709,15 @@ if (targetMethod.nonEmpty) {{
             }
         """
         try:
-            validate_session_id(session_id)
+            validate_codebase_hash(codebase_hash)
 
-            session_manager = services["session_manager"]
+            codebase_tracker = services["codebase_tracker"]
             query_executor = services["query_executor"]
 
-            session = await session_manager.get_session(session_id)
-            if not session:
-                raise SessionNotFoundError(f"Session {session_id} not found")
-
-            if session.status != SessionStatus.READY.value:
-                raise SessionNotReadyError(f"Session is in '{session.status}' status")
-
-            await session_manager.touch_session(session_id)
+            # Verify CPG exists for this codebase
+            codebase_info = await codebase_tracker.get_codebase(codebase_hash)
+            if not codebase_info or not codebase_info.cpg_path:
+                raise ValidationError(f"CPG not found for codebase {codebase_hash}. Generate it first using generate_cpg.")
 
             # Build query
             query_parts = ["cpg.literal"]
@@ -761,8 +734,8 @@ if (targetMethod.nonEmpty) {{
             query = "".join(query_parts) + f".take({limit})"
 
             result = await query_executor.execute_query(
-                session_id=session_id,
-                cpg_path="/workspace/cpg.bin",
+                codebase_hash=codebase_hash,
+                cpg_path=codebase_info.cpg_path,
                 query=query,
                 timeout=30,
                 limit=limit,  # Use the limit parameter
@@ -789,7 +762,7 @@ if (targetMethod.nonEmpty) {{
 
             return {"success": True, "literals": literals, "total": len(literals)}
 
-        except (SessionNotFoundError, SessionNotReadyError, ValidationError) as e:
+        except (ValidationError, ValidationError, ValidationError) as e:
             logger.error(f"Error finding literals: {e}")
             return {
                 "success": False,
@@ -803,7 +776,7 @@ if (targetMethod.nonEmpty) {{
             }
 
     @mcp.tool()
-    async def get_codebase_summary(session_id: str) -> Dict[str, Any]:
+    async def get_codebase_summary(codebase_hash: str) -> Dict[str, Any]:
         """
         Get a high-level summary of the codebase structure.
 
@@ -811,7 +784,7 @@ if (targetMethod.nonEmpty) {{
         and other metadata. Useful as a first step when exploring a new codebase.
 
         Args:
-            session_id: The session ID from create_cpg_session
+            codebase_hash: The session ID from create_cpg_session
 
         Returns:
             {
@@ -827,25 +800,21 @@ if (targetMethod.nonEmpty) {{
             }
         """
         try:
-            validate_session_id(session_id)
+            validate_codebase_hash(codebase_hash)
 
-            session_manager = services["session_manager"]
+            codebase_tracker = services["codebase_tracker"]
             query_executor = services["query_executor"]
 
-            session = await session_manager.get_session(session_id)
-            if not session:
-                raise SessionNotFoundError(f"Session {session_id} not found")
-
-            if session.status != SessionStatus.READY.value:
-                raise SessionNotReadyError(f"Session is in '{session.status}' status")
-
-            await session_manager.touch_session(session_id)
+            # Verify CPG exists for this codebase
+            codebase_info = await codebase_tracker.get_codebase(codebase_hash)
+            if not codebase_info or not codebase_info.cpg_path:
+                raise ValidationError(f"CPG not found for codebase {codebase_hash}. Generate it first using generate_cpg.")
 
             # Get metadata
             meta_query = "cpg.metaData.map(m => (m.language, m.version)).toJsonPretty"
             meta_result = await query_executor.execute_query(
-                session_id=session_id,
-                cpg_path="/workspace/cpg.bin",
+                codebase_hash=codebase_hash,
+                cpg_path=codebase_info.cpg_path,
                 query=meta_query,
                 timeout=10,
                 limit=1,
@@ -869,8 +838,8 @@ if (targetMethod.nonEmpty) {{
             """
 
             stats_result = await query_executor.execute_query(
-                session_id=session_id,
-                cpg_path="/workspace/cpg.bin",
+                codebase_hash=codebase_hash,
+                cpg_path=codebase_info.cpg_path,
                 query=stats_query,
                 timeout=30,
                 limit=1,
@@ -899,7 +868,7 @@ if (targetMethod.nonEmpty) {{
 
             return {"success": True, "summary": summary}
 
-        except (SessionNotFoundError, SessionNotReadyError, ValidationError) as e:
+        except (ValidationError, ValidationError, ValidationError) as e:
             logger.error(f"Error getting codebase summary: {e}")
             return {
                 "success": False,
@@ -914,7 +883,7 @@ if (targetMethod.nonEmpty) {{
 
     @mcp.tool()
     async def get_code_snippet(
-        session_id: str, filename: str, start_line: int, end_line: int
+        codebase_hash: str, filename: str, start_line: int, end_line: int
     ) -> Dict[str, Any]:
         """
         Retrieve a code snippet from a specific file with line range.
@@ -923,7 +892,7 @@ if (targetMethod.nonEmpty) {{
         Useful for examining specific parts of the codebase.
 
         Args:
-            session_id: The session ID from create_cpg_session
+            codebase_hash: The session ID from create_cpg_session
             filename: Name of the file to retrieve code from (relative to source root)
             start_line: Starting line number (1-indexed)
             end_line: Ending line number (1-indexed, inclusive)
@@ -938,23 +907,19 @@ if (targetMethod.nonEmpty) {{
             }
         """
         try:
-            validate_session_id(session_id)
+            validate_codebase_hash(codebase_hash)
 
             if start_line < 1 or end_line < start_line:
                 raise ValidationError(
                     "Invalid line range: start_line must be >= 1 and end_line >= start_line"
                 )
 
-            session_manager = services["session_manager"]
+            codebase_tracker = services["codebase_tracker"]
 
-            session = await session_manager.get_session(session_id)
-            if not session:
-                raise SessionNotFoundError(f"Session {session_id} not found")
-
-            if session.status != SessionStatus.READY.value:
-                raise SessionNotReadyError(f"Session is in '{session.status}' status")
-
-            await session_manager.touch_session(session_id)
+            # Verify CPG exists for this codebase
+            codebase_info = await codebase_tracker.get_codebase(codebase_hash)
+            if not codebase_info or not codebase_info.cpg_path:
+                raise ValidationError(f"CPG not found for codebase {codebase_hash}. Generate it first using generate_cpg.")
 
             # Get playground path
             playground_path = os.path.abspath(
@@ -962,16 +927,16 @@ if (targetMethod.nonEmpty) {{
             )
 
             # Get source directory from session
-            if session.source_type == "github":
+            if codebase_info.source_type == "github":
                 # For GitHub repos, use the cached directory
                 from .core_tools import get_cpg_cache_key
                 cpg_cache_key = get_cpg_cache_key(
-                    session.source_type, session.source_path, session.language
+                    codebase_info.source_type, codebase_info.source_path, codebase_info.language
                 )
                 source_dir = os.path.join(playground_path, "codebases", cpg_cache_key)
             else:
                 # For local paths, use the session source path directly
-                source_path = session.source_path
+                source_path = codebase_info.source_path
                 if not os.path.isabs(source_path):
                     source_path = os.path.abspath(source_path)
                 source_dir = source_path
@@ -1014,7 +979,7 @@ if (targetMethod.nonEmpty) {{
                 "code": code,
             }
 
-        except (SessionNotFoundError, SessionNotReadyError, ValidationError) as e:
+        except (ValidationError, ValidationError, ValidationError) as e:
             logger.error(f"Error getting code snippet: {e}")
             return {
                 "success": False,
@@ -1028,7 +993,7 @@ if (targetMethod.nonEmpty) {{
             }
     @mcp.tool()
     async def find_bounds_checks(
-        session_id: str, buffer_access_location: str
+        codebase_hash: str, buffer_access_location: str
     ) -> Dict[str, Any]:
         """
         Find bounds checks near buffer access.
@@ -1039,7 +1004,7 @@ if (targetMethod.nonEmpty) {{
         or happen after the access.
 
         Args:
-            session_id: The session ID from create_cpg_session
+            codebase_hash: The session ID from create_cpg_session
             buffer_access_location: Location of buffer access in format "filename:line"
                                   (e.g., "parser.c:3393")
 
@@ -1067,7 +1032,7 @@ if (targetMethod.nonEmpty) {{
             }
         """
         try:
-            validate_session_id(session_id)
+            validate_codebase_hash(codebase_hash)
 
             # Parse the buffer access location
             if ":" not in buffer_access_location:
@@ -1081,57 +1046,23 @@ if (targetMethod.nonEmpty) {{
             except ValueError:
                 raise ValidationError(f"Invalid line number: {line_str}")
 
-            session_manager = services["session_manager"]
+            codebase_tracker = services["codebase_tracker"]
             query_executor = services["query_executor"]
 
-            session = await session_manager.get_session(session_id)
-            if not session:
-                raise SessionNotFoundError(f"Session {session_id} not found")
-
-            if session.status != SessionStatus.READY.value:
-                raise SessionNotReadyError(f"Session is in '{session.status}' status")
-
-            await session_manager.touch_session(session_id)
+            # Verify CPG exists for this codebase
+            codebase_info = await codebase_tracker.get_codebase(codebase_hash)
+            if not codebase_info or not codebase_info.cpg_path:
+                raise ValidationError(f"CPG not found for codebase {codebase_hash}. Generate it first using generate_cpg.")
 
             # Build the Joern query to find buffer access and bounds checks
-            # Use raw string to avoid escaping issues
-            # Wrap in braces to avoid REPL line-by-line interpretation issues
-            query_template = r"""{
-def escapeJson(s: String): String = {
-s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
-}
-val bufferAccessOpt = cpg.call.name("<operator>.indirectIndexAccess").where(_.file.name(".*FILENAME_PLACEHOLDER")).lineNumber(LINE_NUM_PLACEHOLDER).headOption
-bufferAccessOpt match {
-case Some(bufferAccess) =>
-val accessLine = bufferAccess.lineNumber.getOrElse(0)
-val args = bufferAccess.argument.l
-val bufferName = if (args.nonEmpty) args.head.code else "unknown"
-val indexExpr = if (args.size > 1) args.last.code else "unknown"
-val indexVar = indexExpr.replaceAll("[^a-zA-Z0-9_].*", "")
-val method = bufferAccess.method
-val comparisons = method.call.name("<operator>.(lessThan|greaterThan|lessEqualsThan|greaterEqualsThan)").filter { cmp => val args = cmp.argument.code.l; args.exists(_.contains(indexVar)) }.l
-val boundsChecksJson = comparisons.map { cmp =>
-val cmpLine = cmp.lineNumber.getOrElse(0)
-val position = if (cmpLine < accessLine) "BEFORE_ACCESS" else if (cmpLine > accessLine) "AFTER_ACCESS" else "SAME_LINE"
-val args = cmp.argument.l
-val leftArg = if (args.nonEmpty) args.head.code else "?"
-val rightArg = if (args.size > 1) args.last.code else "?"
-val operator = cmp.name match { case "<operator>.lessThan" => "<"; case "<operator>.greaterThan" => ">"; case "<operator>.lessEqualsThan" => "<="; case "<operator>.greaterEqualsThan" => ">="; case _ => "?" }
-"{\"line\":" + cmpLine + ",\"code\":\"" + escapeJson(cmp.code) + "\",\"checked_variable\":\"" + escapeJson(leftArg) + "\",\"bound\":\"" + escapeJson(rightArg) + "\",\"operator\":\"" + operator + "\",\"position\":\"" + position + "\"}"
-}.mkString(",")
-val checkBefore = comparisons.exists { cmp => val cmpLine = cmp.lineNumber.getOrElse(0); cmpLine < accessLine }
-val checkAfter = comparisons.exists { cmp => val cmpLine = cmp.lineNumber.getOrElse(0); cmpLine > accessLine }
-"{\"success\":true,\"buffer_access\":{\"line\":" + accessLine + ",\"code\":\"" + escapeJson(bufferAccess.code) + "\",\"buffer\":\"" + escapeJson(bufferName) + "\",\"index\":\"" + escapeJson(indexExpr) + "\"},\"bounds_checks\":[" + boundsChecksJson + "],\"check_before_access\":" + checkBefore + ",\"check_after_access\":" + checkAfter + "}"
-case None =>
-"{\"success\":false,\"error\":{\"code\":\"NOT_FOUND\",\"message\":\"No buffer access found at FILENAME_PLACEHOLDER:LINE_NUM_PLACEHOLDER\"}}"
-}
-}"""
+            # Use a simpler single-expression approach that Joern REPL can execute
+            query_template = r"""cpg.call.name("<operator>.indirectIndexAccess").where(_.file.name(".*FILENAME_PLACEHOLDER")).lineNumber(LINE_NUM_PLACEHOLDER).headOption.map { bufferAccess => val accessLine = bufferAccess.lineNumber.getOrElse(0); val args = bufferAccess.argument.l; val bufferName = if (args.nonEmpty) args.head.code else "unknown"; val indexExpr = if (args.size > 1) args.last.code else "unknown"; val indexVar = indexExpr.replaceAll("[^a-zA-Z0-9_].*", ""); val method = bufferAccess.method; val comparisons = method.call.name("<operator>.(lessThan|greaterThan|lessEqualsThan|greaterEqualsThan)").filter(cmp => cmp.argument.code.l.exists(_.contains(indexVar))).l; val boundsChecks = comparisons.map { cmp => val cmpLine = cmp.lineNumber.getOrElse(0); val position = if (cmpLine < accessLine) "BEFORE_ACCESS" else if (cmpLine > accessLine) "AFTER_ACCESS" else "SAME_LINE"; val cmpArgs = cmp.argument.l; val leftArg = if (cmpArgs.nonEmpty) cmpArgs.head.code else "?"; val rightArg = if (cmpArgs.size > 1) cmpArgs.last.code else "?"; val operator = cmp.name match { case "<operator>.lessThan" => "<"; case "<operator>.greaterThan" => ">"; case "<operator>.lessEqualsThan" => "<="; case "<operator>.greaterEqualsThan" => ">="; case _ => "?" }; Map("line" -> cmpLine, "code" -> cmp.code, "checked_variable" -> leftArg, "bound" -> rightArg, "operator" -> operator, "position" -> position) }; val checkBefore = comparisons.exists(cmp => cmp.lineNumber.getOrElse(0) < accessLine); val checkAfter = comparisons.exists(cmp => cmp.lineNumber.getOrElse(0) > accessLine); Map("success" -> true, "buffer_access" -> Map("line" -> accessLine, "code" -> bufferAccess.code, "buffer" -> bufferName, "index" -> indexExpr), "bounds_checks" -> boundsChecks, "check_before_access" -> checkBefore, "check_after_access" -> checkAfter) }.getOrElse(Map("success" -> false, "error" -> Map("code" -> "NOT_FOUND", "message" -> "No buffer access found at FILENAME_PLACEHOLDER:LINE_NUM_PLACEHOLDER"))).toJsonPretty"""
             
             query = query_template.replace("FILENAME_PLACEHOLDER", filename).replace("LINE_NUM_PLACEHOLDER", str(line_num))
 
             result = await query_executor.execute_query(
-                session_id=session_id,
-                cpg_path="/workspace/cpg.bin",
+                codebase_hash=codebase_hash,
+                cpg_path=codebase_info.cpg_path,
                 query=query,
                 timeout=30,
             )
@@ -1142,17 +1073,33 @@ case None =>
                     "error": {"code": "QUERY_ERROR", "message": result.error},
                 }
 
-            # Parse the JSON result
+            # Parse the JSON result - the query now uses Map().toJsonPretty
             import json
 
             if isinstance(result.data, list) and len(result.data) > 0:
+                # The result should be a parsed JSON object already
                 result_data = result.data[0]
                 
-                # Handle JSON string response from upickle.write
-                if isinstance(result_data, str):
-                    return json.loads(result_data)
-                else:
+                # If it's already a dict, return it directly
+                if isinstance(result_data, dict):
                     return result_data
+                
+                # Otherwise try to parse as string
+                elif isinstance(result_data, str):
+                    try:
+                        return json.loads(result_data)
+                    except json.JSONDecodeError as e:
+                        logger.error(f"Failed to parse bounds check JSON: {e}, raw: {result_data[:200]}")
+                        return {
+                            "success": False,
+                            "error": {"code": "PARSE_ERROR", "message": f"Failed to parse result: {str(e)}"},
+                        }
+                else:
+                    logger.error(f"Unexpected result_data type: {type(result_data)}, value: {result_data}")
+                    return {
+                        "success": False,
+                        "error": {"code": "UNEXPECTED_FORMAT", "message": "Unexpected response format"},
+                    }
             else:
                 return {
                     "success": False,
@@ -1162,7 +1109,7 @@ case None =>
                     },
                 }
 
-        except (SessionNotFoundError, SessionNotReadyError, ValidationError) as e:
+        except (ValidationError, ValidationError, ValidationError) as e:
             logger.error(f"Error finding bounds checks: {e}")
             return {
                 "success": False,

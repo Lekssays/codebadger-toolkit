@@ -26,6 +26,6 @@ else
 fi
 
 echo ""
-echo "🚀 Ready to run the Joern MCP Server!"
+echo "🚀 Ready to run the CodeBadger Toolkit Server!"
 echo "   Usage: python main.py"
 echo ""

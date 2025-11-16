@@ -4,7 +4,7 @@
 
 set -e
 
-echo "🕷️  Setting up Joern MCP Server..."
+echo "🦡  Setting up CodeBadger Toolkit Server..."
 echo ""
 
 # Check if Docker is running

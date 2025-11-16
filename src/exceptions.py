@@ -1,57 +1,57 @@
 """
-Custom exceptions for Joern MCP Server
+Custom exceptions for CodeBadger Toolkit Server
 """
 
 
-class JoernMCPError(Exception):
-    """Base exception for Joern MCP"""
+class JoernMCPException(Exception):
+    """Base exception for CodeBadger Toolkit"""
 
     pass
 
 
-class SessionNotFoundError(JoernMCPError):
+class SessionNotFoundError(JoernMCPException):
     """Session does not exist"""
 
     pass
 
 
-class SessionNotReadyError(JoernMCPError):
+class SessionNotReadyError(JoernMCPException):
     """Session is not in ready state"""
 
     pass
 
 
-class CPGGenerationError(JoernMCPError):
+class CPGGenerationError(JoernMCPException):
     """CPG generation failed"""
 
     pass
 
 
-class QueryExecutionError(JoernMCPError):
+class QueryExecutionError(JoernMCPException):
     """Query execution failed"""
 
     pass
 
 
-class DockerError(JoernMCPError):
+class DockerError(JoernMCPException):
     """Docker operation failed"""
 
     pass
 
 
-class ResourceLimitError(JoernMCPError):
+class ResourceLimitError(JoernMCPException):
     """Resource limit exceeded"""
 
     pass
 
 
-class ValidationError(JoernMCPError):
+class ValidationError(JoernMCPException):
     """Input validation failed"""
 
     pass
 
 
-class GitOperationError(JoernMCPError):
+class GitOperationError(JoernMCPException):
     """Git operation failed"""
 
     pass

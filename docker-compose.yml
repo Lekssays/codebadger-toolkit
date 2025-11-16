@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  codebadger-toolkit:
+    build:
+      context: .
+      dockerfile: Dockerfile.joern
+    image: codebadger-toolkit:latest
+    container_name: codebadger-toolkit-server
+    ports:
+      - "4242:4242"
+    environment:
+      - MCP_HOST=0.0.0.0
+      - MCP_PORT=4242
+      - REDIS_HOST=localhost
+      - REDIS_PORT=6379
+      - PYTHONUNBUFFERED=1
+    volumes:
+      # Mount playground for persistent CPG storage
+      - ./playground:/app/playground
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4242/mcp"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s

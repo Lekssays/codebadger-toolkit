@@ -476,5 +476,5 @@ query:
   cache_ttl: ${QUERY_CACHE_TTL:300}
 
 storage:
-  workspace_root: ${WORKSPACE_ROOT:/tmp/joern-mcp}
+  workspace_root: ${WORKSPACE_ROOT:/tmp/codebadger-toolkit}
   cleanup_on_shutdown: ${CLEANUP_ON_SHUTDOWN:true}

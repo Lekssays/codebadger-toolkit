@@ -161,7 +161,7 @@ class TestEndpoints:
         response_dict = json.loads(response_data.decode('utf-8'))
 
         assert response_dict["status"] == "healthy"
-        assert response_dict["service"] == "joern-mcp-server"
+        assert response_dict["service"] == "codebadger-toolkit"
         assert response_dict["version"] == VERSION
 
     @pytest.mark.asyncio
@@ -184,7 +184,7 @@ class TestEndpoints:
         import json
         response_dict = json.loads(response_data.decode('utf-8'))
 
-        assert response_dict["service"] == "joern-mcp-server"
+        assert response_dict["service"] == "codebadger-toolkit"
         assert "description" in response_dict
         assert response_dict["version"] == VERSION
         assert "endpoints" in response_dict

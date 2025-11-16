@@ -1,1 +1,1 @@
-# Test package for Joern MCP
+# Test package for CodeBadger Toolkit
