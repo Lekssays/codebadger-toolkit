@@ -21,7 +21,7 @@ def register_code_browsing_tools(mcp, services: dict):
 
 
     @mcp.tool()
-    async def list_methods(
+    def list_methods(
         codebase_hash: str,
         name_pattern: Optional[str] = None,
         file_pattern: Optional[str] = None,
@@ -64,7 +64,7 @@ def register_code_browsing_tools(mcp, services: dict):
             query_executor = services["query_executor"]
 
             # Verify CPG exists for this codebase
-            codebase_info = await codebase_tracker.get_codebase(codebase_hash)
+            codebase_info = codebase_tracker.get_codebase(codebase_hash)
             if not codebase_info or not codebase_info.cpg_path:
                 raise ValidationError(f"CPG not found for codebase {codebase_hash}. Generate it first using generate_cpg.")
 
@@ -91,7 +91,7 @@ def register_code_browsing_tools(mcp, services: dict):
 
             logger.info(f"list_methods query: {query}")
 
-            result = await query_executor.execute_query(
+            result = query_executor.execute_query(
                 codebase_hash=codebase_hash,
                 cpg_path=codebase_info.cpg_path,
                 query=query,
@@ -139,7 +139,7 @@ def register_code_browsing_tools(mcp, services: dict):
             }
 
     @mcp.tool()
-    async def get_method_source(
+    def get_method_source(
         codebase_hash: str, method_name: str, filename: Optional[str] = None
     ) -> Dict[str, Any]:
         """
@@ -175,7 +175,7 @@ def register_code_browsing_tools(mcp, services: dict):
             query_executor = services["query_executor"]
 
             # Verify CPG exists for this codebase
-            codebase_info = await codebase_tracker.get_codebase(codebase_hash)
+            codebase_info = codebase_tracker.get_codebase(codebase_hash)
             if not codebase_info or not codebase_info.cpg_path:
                 raise ValidationError(f"CPG not found for codebase {codebase_hash}. Generate it first using generate_cpg.")
 
@@ -190,7 +190,7 @@ def register_code_browsing_tools(mcp, services: dict):
             )
             query = "".join(query_parts) + ".toJsonPretty"
 
-            result = await query_executor.execute_query(
+            result = query_executor.execute_query(
                 codebase_hash=codebase_hash,
                 cpg_path=codebase_info.cpg_path,
                 query=query,
@@ -300,7 +300,7 @@ def register_code_browsing_tools(mcp, services: dict):
             }
 
     @mcp.tool()
-    async def list_calls(
+    def list_calls(
         codebase_hash: str,
         caller_pattern: Optional[str] = None,
         callee_pattern: Optional[str] = None,
@@ -340,7 +340,7 @@ def register_code_browsing_tools(mcp, services: dict):
             query_executor = services["query_executor"]
 
             # Verify CPG exists for this codebase
-            codebase_info = await codebase_tracker.get_codebase(codebase_hash)
+            codebase_info = codebase_tracker.get_codebase(codebase_hash)
             if not codebase_info or not codebase_info.cpg_path:
                 raise ValidationError(f"CPG not found for codebase {codebase_hash}. Generate it first using generate_cpg.")
 
@@ -361,7 +361,7 @@ def register_code_browsing_tools(mcp, services: dict):
 
             logger.info(f"list_calls query: {query}")
 
-            result = await query_executor.execute_query(
+            result = query_executor.execute_query(
                 codebase_hash=codebase_hash,
                 cpg_path=codebase_info.cpg_path,
                 query=query,
@@ -404,7 +404,7 @@ def register_code_browsing_tools(mcp, services: dict):
             }
 
     @mcp.tool()
-    async def get_call_graph(
+    def get_call_graph(
         codebase_hash: str, method_name: str, depth: int = 5, direction: str = "outgoing"
     ) -> Dict[str, Any]:
         """
@@ -445,7 +445,7 @@ def register_code_browsing_tools(mcp, services: dict):
             query_executor = services["query_executor"]
 
             # Verify CPG exists for this codebase
-            codebase_info = await codebase_tracker.get_codebase(codebase_hash)
+            codebase_info = codebase_tracker.get_codebase(codebase_hash)
             if not codebase_info or not codebase_info.cpg_path:
                 raise ValidationError(f"CPG not found for codebase {codebase_hash}. Generate it first using generate_cpg.")
 
@@ -464,34 +464,7 @@ def register_code_browsing_tools(mcp, services: dict):
                     )
                 else:
                     # For depth > 1, use inline BFS with braces to ensure proper parsing
-                    query = f"""{{
-val rootMethod = cpg.method.name("{method_escaped}").l
-if (rootMethod.nonEmpty) {{
-  val rootName = rootMethod.head.name
-  var allCalls = scala.collection.mutable.ListBuffer[(String, String, Int)]()
-  var toVisit = scala.collection.mutable.Queue[(io.shiftleft.codepropertygraph.generated.nodes.Method, Int)]()
-  var visited = Set[String]()
-  toVisit.enqueue((rootMethod.head, 0))
-  while (toVisit.nonEmpty) {{
-    val (current, currentDepth) = toVisit.dequeue()
-    val currentName = current.name
-    if (!visited.contains(currentName) && currentDepth < {depth}) {{
-      visited = visited + currentName
-      val callees = current.call.callee.l
-      for (callee <- callees) {{
-        val calleeName = callee.name
-        if (!calleeName.startsWith("<operator>")) {{
-          allCalls += ((currentName, calleeName, currentDepth + 1))
-          if (!visited.contains(calleeName)) {{
-            toVisit.enqueue((callee, currentDepth + 1))
-          }}
-        }}
-      }}
-    }}
-  }}
-  allCalls.toList
-}} else List[(String, String, Int)]()
-}}.toJsonPretty"""
+                    query = f'{{ val rootMethod = cpg.method.name("{method_escaped}").l; if (rootMethod.nonEmpty) {{ val rootName = rootMethod.head.name; var allCalls = scala.collection.mutable.ListBuffer[(String, String, Int)](); var toVisit = scala.collection.mutable.Queue[(io.shiftleft.codepropertygraph.generated.nodes.Method, Int)](); var visited = Set[String](); toVisit.enqueue((rootMethod.head, 0)); while (toVisit.nonEmpty) {{ val (current, currentDepth) = toVisit.dequeue(); val currentName = current.name; if (!visited.contains(currentName) && currentDepth < {depth}) {{ visited = visited + currentName; val callees = current.call.callee.l; for (callee <- callees) {{ val calleeName = callee.name; if (!calleeName.startsWith("<operator>")) {{ allCalls += ((currentName, calleeName, currentDepth + 1)); if (!visited.contains(calleeName)) {{ toVisit.enqueue((callee, currentDepth + 1)) }} }} }} }} }}; allCalls.toList }} else List[(String, String, Int)]() }}.toJsonPretty'
             else:  # incoming
                 # Simpler one-liner approach for incoming calls (what calls this method)
                 # For depth 1: direct callers
@@ -503,40 +476,9 @@ if (rootMethod.nonEmpty) {{
                     )
                 else:
                     # For depth > 1, use inline BFS with braces to ensure proper parsing
-                    query = f"""{{
-val targetMethod = cpg.method.name("{method_escaped}").l
-if (targetMethod.nonEmpty) {{
-  val targetName = targetMethod.head.name
-  var allCallers = scala.collection.mutable.ListBuffer[(String, String, Int)]()
-  var toVisit = scala.collection.mutable.Queue[(io.shiftleft.codepropertygraph.generated.nodes.Method, Int)]()
-  var visited = Set[String]()
-  val directCallers = targetMethod.head.caller.l
-  for (caller <- directCallers) {{
-    allCallers += ((caller.name, targetName, 1))
-    toVisit.enqueue((caller, 1))
-  }}
-  while (toVisit.nonEmpty) {{
-    val (current, currentDepth) = toVisit.dequeue()
-    val currentName = current.name
-    if (!visited.contains(currentName) && currentDepth < {depth}) {{
-      visited = visited + currentName
-      val incomingCallers = current.caller.l
-      for (caller <- incomingCallers) {{
-        val callerName = caller.name
-        if (!callerName.startsWith("<operator>")) {{
-          allCallers += ((callerName, targetName, currentDepth + 1))
-          if (!visited.contains(callerName)) {{
-            toVisit.enqueue((caller, currentDepth + 1))
-          }}
-        }}
-      }}
-    }}
-  }}
-  allCallers.toList
-}} else List[(String, String, Int)]()
-}}.toJsonPretty"""
+                    query = f'{{ val targetMethod = cpg.method.name("{method_escaped}").l; if (targetMethod.nonEmpty) {{ val targetName = targetMethod.head.name; var allCallers = scala.collection.mutable.ListBuffer[(String, String, Int)](); var toVisit = scala.collection.mutable.Queue[(io.shiftleft.codepropertygraph.generated.nodes.Method, Int)](); var visited = Set[String](); val directCallers = targetMethod.head.caller.l; for (caller <- directCallers) {{ allCallers += ((caller.name, targetName, 1)); toVisit.enqueue((caller, 1)) }}; while (toVisit.nonEmpty) {{ val (current, currentDepth) = toVisit.dequeue(); val currentName = current.name; if (!visited.contains(currentName) && currentDepth < {depth}) {{ visited = visited + currentName; val incomingCallers = current.caller.l; for (caller <- incomingCallers) {{ val callerName = caller.name; if (!callerName.startsWith("<operator>")) {{ allCallers += ((callerName, targetName, currentDepth + 1)); if (!visited.contains(callerName)) {{ toVisit.enqueue((caller, currentDepth + 1)) }} }} }} }} }}; allCallers.toList }} else List[(String, String, Int)]() }}.toJsonPretty'
 
-            result = await query_executor.execute_query(
+            result = query_executor.execute_query(
                 codebase_hash=codebase_hash,
                 cpg_path=codebase_info.cpg_path,
                 query=query,
@@ -583,7 +525,7 @@ if (targetMethod.nonEmpty) {{
             }
 
     @mcp.tool()
-    async def list_parameters(codebase_hash: str, method_name: str) -> Dict[str, Any]:
+    def list_parameters(codebase_hash: str, method_name: str) -> Dict[str, Any]:
         """
         List parameters of a specific method.
 
@@ -616,7 +558,7 @@ if (targetMethod.nonEmpty) {{
             query_executor = services["query_executor"]
 
             # Verify CPG exists for this codebase
-            codebase_info = await codebase_tracker.get_codebase(codebase_hash)
+            codebase_info = codebase_tracker.get_codebase(codebase_hash)
             if not codebase_info or not codebase_info.cpg_path:
                 raise ValidationError(f"CPG not found for codebase {codebase_hash}. Generate it first using generate_cpg.")
 
@@ -626,7 +568,7 @@ if (targetMethod.nonEmpty) {{
                 f"(p.name, p.typeFullName, p.index)).l)).toJsonPretty"
             )
 
-            result = await query_executor.execute_query(
+            result = query_executor.execute_query(
                 codebase_hash=codebase_hash,
                 cpg_path=codebase_info.cpg_path,
                 query=query,
@@ -674,7 +616,7 @@ if (targetMethod.nonEmpty) {{
             }
 
     @mcp.tool()
-    async def find_literals(
+    def find_literals(
         codebase_hash: str,
         pattern: Optional[str] = None,
         literal_type: Optional[str] = None,
@@ -715,7 +657,7 @@ if (targetMethod.nonEmpty) {{
             query_executor = services["query_executor"]
 
             # Verify CPG exists for this codebase
-            codebase_info = await codebase_tracker.get_codebase(codebase_hash)
+            codebase_info = codebase_tracker.get_codebase(codebase_hash)
             if not codebase_info or not codebase_info.cpg_path:
                 raise ValidationError(f"CPG not found for codebase {codebase_hash}. Generate it first using generate_cpg.")
 
@@ -733,7 +675,7 @@ if (targetMethod.nonEmpty) {{
             )
             query = "".join(query_parts) + f".take({limit})"
 
-            result = await query_executor.execute_query(
+            result = query_executor.execute_query(
                 codebase_hash=codebase_hash,
                 cpg_path=codebase_info.cpg_path,
                 query=query,
@@ -776,7 +718,7 @@ if (targetMethod.nonEmpty) {{
             }
 
     @mcp.tool()
-    async def get_codebase_summary(codebase_hash: str) -> Dict[str, Any]:
+    def get_codebase_summary(codebase_hash: str) -> Dict[str, Any]:
         """
         Get a high-level summary of the codebase structure.
 
@@ -806,13 +748,13 @@ if (targetMethod.nonEmpty) {{
             query_executor = services["query_executor"]
 
             # Verify CPG exists for this codebase
-            codebase_info = await codebase_tracker.get_codebase(codebase_hash)
+            codebase_info = codebase_tracker.get_codebase(codebase_hash)
             if not codebase_info or not codebase_info.cpg_path:
                 raise ValidationError(f"CPG not found for codebase {codebase_hash}. Generate it first using generate_cpg.")
 
             # Get metadata
             meta_query = "cpg.metaData.map(m => (m.language, m.version)).toJsonPretty"
-            meta_result = await query_executor.execute_query(
+            meta_result = query_executor.execute_query(
                 codebase_hash=codebase_hash,
                 cpg_path=codebase_info.cpg_path,
                 query=meta_query,
@@ -837,7 +779,7 @@ if (targetMethod.nonEmpty) {{
             )).toJsonPretty
             """
 
-            stats_result = await query_executor.execute_query(
+            stats_result = query_executor.execute_query(
                 codebase_hash=codebase_hash,
                 cpg_path=codebase_info.cpg_path,
                 query=stats_query,
@@ -857,11 +799,11 @@ if (targetMethod.nonEmpty) {{
             if stats_result.success and stats_result.data:
                 item = stats_result.data[0]
                 if isinstance(item, dict):
-                    summary["total_files"] = item.get("_1", 0)
-                    summary["total_methods"] = item.get("_2", 0)
-                    summary["user_defined_methods"] = item.get("_3", 0)
-                    summary["total_calls"] = item.get("_4", 0)
-                    summary["total_literals"] = item.get("_5", 0)
+                    summary["total_files"] = int(item.get("_1", 0))
+                    summary["total_methods"] = int(item.get("_2", 0))
+                    summary["user_defined_methods"] = int(item.get("_3", 0))
+                    summary["total_calls"] = int(item.get("_4", 0))
+                    summary["total_literals"] = int(item.get("_5", 0))
                     summary["external_methods"] = (
                         summary["total_methods"] - summary["user_defined_methods"]
                     )
@@ -882,7 +824,7 @@ if (targetMethod.nonEmpty) {{
             }
 
     @mcp.tool()
-    async def get_code_snippet(
+    def get_code_snippet(
         codebase_hash: str, filename: str, start_line: int, end_line: int
     ) -> Dict[str, Any]:
         """
@@ -917,7 +859,7 @@ if (targetMethod.nonEmpty) {{
             codebase_tracker = services["codebase_tracker"]
 
             # Verify CPG exists for this codebase
-            codebase_info = await codebase_tracker.get_codebase(codebase_hash)
+            codebase_info = codebase_tracker.get_codebase(codebase_hash)
             if not codebase_info or not codebase_info.cpg_path:
                 raise ValidationError(f"CPG not found for codebase {codebase_hash}. Generate it first using generate_cpg.")
 
@@ -992,7 +934,83 @@ if (targetMethod.nonEmpty) {{
                 "error": {"code": "INTERNAL_ERROR", "message": str(e)},
             }
     @mcp.tool()
-    async def find_bounds_checks(
+    def run_cpgql_query(
+        codebase_hash: str,
+        query: str,
+        timeout: Optional[int] = None,
+        limit: Optional[int] = 150,
+    ) -> Dict[str, Any]:
+        """
+        Execute a raw CPGQL query against the codebase.
+
+        Run arbitrary Code Property Graph Query Language (CPGQL) queries
+        for advanced analysis and exploration of the codebase structure.
+
+        Args:
+            codebase_hash: The session ID from create_cpg_session
+            query: The CPGQL query string to execute
+            timeout: Optional timeout in seconds (default: 30)
+            limit: Optional maximum number of results to return (default: 150)
+
+        Returns:
+            {
+                "success": true,
+                "data": [...],  # Query results as list of dictionaries
+                "row_count": 42,
+                "execution_time": 1.23
+            }
+        """
+        try:
+            validate_codebase_hash(codebase_hash)
+
+            if not query or not query.strip():
+                raise ValidationError("Query cannot be empty")
+
+            codebase_tracker = services["codebase_tracker"]
+            query_executor = services["query_executor"]
+
+            # Verify CPG exists for this codebase
+            codebase_info = codebase_tracker.get_codebase(codebase_hash)
+            if not codebase_info or not codebase_info.cpg_path:
+                raise ValidationError(f"CPG not found for codebase {codebase_hash}. Generate it first using generate_cpg.")
+
+            # Execute the query using the query executor service
+            result = query_executor.execute_query(
+                codebase_hash=codebase_hash,
+                cpg_path=codebase_info.cpg_path,
+                query=query.strip(),
+                timeout=timeout or 30,
+                limit=limit,
+            )
+
+            if not result.success:
+                return {
+                    "success": False,
+                    "error": {"code": "QUERY_ERROR", "message": result.error},
+                }
+
+            return {
+                "success": True,
+                "data": result.data,
+                "row_count": result.row_count,
+                "execution_time": result.execution_time,
+            }
+
+        except (ValidationError, ValidationError, ValidationError) as e:
+            logger.error(f"Error executing CPGQL query: {e}")
+            return {
+                "success": False,
+                "error": {"code": type(e).__name__.upper(), "message": str(e)},
+            }
+        except Exception as e:
+            logger.error(f"Unexpected error executing CPGQL query: {e}", exc_info=True)
+            return {
+                "success": False,
+                "error": {"code": "INTERNAL_ERROR", "message": str(e)},
+            }
+
+    @mcp.tool()
+    def find_bounds_checks(
         codebase_hash: str, buffer_access_location: str
     ) -> Dict[str, Any]:
         """
@@ -1050,7 +1068,7 @@ if (targetMethod.nonEmpty) {{
             query_executor = services["query_executor"]
 
             # Verify CPG exists for this codebase
-            codebase_info = await codebase_tracker.get_codebase(codebase_hash)
+            codebase_info = codebase_tracker.get_codebase(codebase_hash)
             if not codebase_info or not codebase_info.cpg_path:
                 raise ValidationError(f"CPG not found for codebase {codebase_hash}. Generate it first using generate_cpg.")
 
@@ -1060,7 +1078,7 @@ if (targetMethod.nonEmpty) {{
             
             query = query_template.replace("FILENAME_PLACEHOLDER", filename).replace("LINE_NUM_PLACEHOLDER", str(line_num))
 
-            result = await query_executor.execute_query(
+            result = query_executor.execute_query(
                 codebase_hash=codebase_hash,
                 cpg_path=codebase_info.cpg_path,
                 query=query,

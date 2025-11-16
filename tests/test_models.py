@@ -14,93 +14,10 @@ from src.models import (
     QueryResult,
     RedisConfig,
     ServerConfig,
-    Session,
-    SessionConfig,
     SessionStatus,
     SourceType,
     StorageConfig,
 )
-
-
-class TestSession:
-    """Test Session model"""
-
-    def test_session_creation(self):
-        """Test basic session creation"""
-        session = Session(
-            id="test-id",
-            source_type="github",
-            source_path="https://github.com/user/repo",
-            language="python",
-        )
-
-        assert session.id == "test-id"
-        assert session.source_type == "github"
-        assert session.source_path == "https://github.com/user/repo"
-        assert session.language == "python"
-        assert session.status == SessionStatus.INITIALIZING.value
-        assert session.container_id is None
-        assert session.cpg_path is None
-        assert isinstance(session.created_at, datetime)
-        assert isinstance(session.last_accessed, datetime)
-        assert session.error_message is None
-        assert session.metadata == {}
-
-    def test_session_to_dict(self):
-        """Test session serialization"""
-        session = Session(
-            id="test-id",
-            source_type="local",
-            source_path="/path/to/code",
-            language="java",
-            status="ready",
-            container_id="container-123",
-            cpg_path="/path/to/cpg.bin",
-            error_message="Test error",
-        )
-
-        data = session.to_dict()
-
-        assert data["id"] == "test-id"
-        assert data["source_type"] == "local"
-        assert data["source_path"] == "/path/to/code"
-        assert data["language"] == "java"
-        assert data["status"] == "ready"
-        assert data["container_id"] == "container-123"
-        assert data["cpg_path"] == "/path/to/cpg.bin"
-        assert data["error_message"] == "Test error"
-        assert "created_at" in data
-        assert "last_accessed" in data
-
-    def test_session_from_dict(self):
-        """Test session deserialization"""
-        data = {
-            "id": "test-id",
-            "source_type": "github",
-            "source_path": "https://github.com/user/repo",
-            "language": "python",
-            "status": "ready",
-            "container_id": "container-123",
-            "cpg_path": "/path/to/cpg.bin",
-            "created_at": "2023-01-01T12:00:00",
-            "last_accessed": "2023-01-01T12:30:00",
-            "error_message": None,
-            "metadata": {"key": "value"},
-        }
-
-        session = Session.from_dict(data)
-
-        assert session.id == "test-id"
-        assert session.source_type == "github"
-        assert session.source_path == "https://github.com/user/repo"
-        assert session.language == "python"
-        assert session.status == "ready"
-        assert session.container_id == "container-123"
-        assert session.cpg_path == "/path/to/cpg.bin"
-        assert session.error_message is None
-        assert session.metadata == {"key": "value"}
-        assert isinstance(session.created_at, datetime)
-        assert isinstance(session.last_accessed, datetime)
 
 
 class TestQueryResult:
@@ -177,17 +94,13 @@ class TestConfigModels:
         assert config.db == 1
         assert config.decode_responses is True
 
-    def test_session_config(self):
-        """Test SessionConfig creation"""
-        config = SessionConfig(ttl=7200, idle_timeout=3600, max_concurrent=50)
-
-        assert config.ttl == 7200
-        assert config.idle_timeout == 3600
-        assert config.max_concurrent == 50
-
     def test_cpg_config(self):
         """Test CPGConfig creation"""
-        config = CPGConfig(generation_timeout=1200, max_repo_size_mb=1000)
+        config = CPGConfig(
+            generation_timeout=1200,
+            max_repo_size_mb=1000,
+            supported_languages=["java", "python", "c", "cpp"]
+        )
 
         assert config.generation_timeout == 1200
         assert config.max_repo_size_mb == 1000
@@ -222,7 +135,6 @@ class TestConfigModels:
             server=ServerConfig(host="0.0.0.0", port=4242),
             redis=RedisConfig(host="redis", port=6379),
             joern=JoernConfig(binary_path="joern"),
-            sessions=SessionConfig(ttl=3600),
             cpg=CPGConfig(generation_timeout=600),
             query=QueryConfig(timeout=30),
             storage=StorageConfig(workspace_root="/tmp/joern"),
@@ -231,7 +143,6 @@ class TestConfigModels:
         assert config.server.host == "0.0.0.0"
         assert config.redis.host == "redis"
         assert config.joern.binary_path == "joern"
-        assert config.sessions.ttl == 3600
         assert config.cpg.generation_timeout == 600
         assert config.query.timeout == 30
         assert config.storage.workspace_root == "/tmp/joern"

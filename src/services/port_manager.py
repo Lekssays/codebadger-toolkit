@@ -2,8 +2,8 @@
 Port manager for assigning unique ports to Joern server instances
 """
 
-import asyncio
 import logging
+import threading
 from typing import Dict, Optional, Set
 
 logger = logging.getLogger(__name__)
@@ -19,11 +19,11 @@ class PortManager:
         self._session_to_port: Dict[str, int] = {}  # session_id -> port
         self._port_to_session: Dict[int, str] = {}  # port -> session_id
         self._available_ports: Set[int] = set(range(self.PORT_MIN, self.PORT_MAX + 1))
-        self._lock = asyncio.Lock()
+        self._lock = threading.Lock()
 
-    async def allocate_port(self, session_id: str) -> int:
+    def allocate_port(self, session_id: str) -> int:
         """Allocate a port for a session"""
-        async with self._lock:
+        with self._lock:
             # Check if session already has a port
             if session_id in self._session_to_port:
                 port = self._session_to_port[session_id]
@@ -42,14 +42,14 @@ class PortManager:
             logger.info(f"Allocated port {port} for session {session_id}")
             return port
 
-    async def get_port(self, session_id: str) -> Optional[int]:
+    def get_port(self, session_id: str) -> Optional[int]:
         """Get the port assigned to a session"""
-        async with self._lock:
+        with self._lock:
             return self._session_to_port.get(session_id)
 
-    async def release_port(self, session_id: str) -> bool:
+    def release_port(self, session_id: str) -> bool:
         """Release the port assigned to a session"""
-        async with self._lock:
+        with self._lock:
             if session_id not in self._session_to_port:
                 logger.warning(f"Session {session_id} has no allocated port")
                 return False
@@ -62,17 +62,17 @@ class PortManager:
             logger.info(f"Released port {port} from session {session_id}")
             return True
 
-    async def get_session_by_port(self, port: int) -> Optional[str]:
+    def get_session_by_port(self, port: int) -> Optional[str]:
         """Get the session ID for a given port"""
-        async with self._lock:
+        with self._lock:
             return self._port_to_session.get(port)
 
-    async def get_all_allocations(self) -> Dict[str, int]:
+    def get_all_allocations(self) -> Dict[str, int]:
         """Get all current port allocations"""
-        async with self._lock:
+        with self._lock:
             return self._session_to_port.copy()
 
-    async def available_count(self) -> int:
+    def available_count(self) -> int:
         """Get the count of available ports"""
-        async with self._lock:
+        with self._lock:
             return len(self._available_ports)

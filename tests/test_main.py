@@ -23,22 +23,31 @@ class TestLifespan:
     @pytest.mark.asyncio
     async def test_lifespan_success(self):
         """Test successful lifespan startup and shutdown"""
-        mock_mcp = AsyncMock()
+        class DummyMCP:
+            def __init__(self):
+                self.registered = {}
+
+            def tool(self):
+                def decorator(func):
+                    self.registered[func.__name__] = func
+                    return func
+
+                return decorator
+
+        mock_mcp = DummyMCP()
 
         # Mock all the services and dependencies
         with patch("main.load_config") as mock_load_config, patch(
             "main.RedisClient"
         ) as mock_redis_client_class, patch(
-            "main.SessionManager"
-        ) as mock_session_manager_class, patch(
+            "main.SyncRedisClient"
+        ) as mock_sync_redis_client_class, patch(
+            "main.CodebaseTracker"
+        ) as mock_codebase_tracker_class, patch(
             "main.GitManager"
         ) as mock_git_manager_class, patch(
             "main.CPGGenerator"
         ) as mock_cpg_generator_class, patch(
-            "main.DockerOrchestrator"
-        ) as mock_docker_orch_class, patch(
-            "main.QueryExecutor"
-        ) as mock_query_executor_class, patch(
             "main.setup_logging"
         ) as mock_setup_logging, patch(
             "main.logger"
@@ -51,7 +60,6 @@ class TestLifespan:
             mock_config.server.log_level = "INFO"
             mock_config.storage.workspace_root = "/tmp/workspace"
             mock_config.redis = AsyncMock()
-            mock_config.sessions = AsyncMock()
             mock_config.cpg = AsyncMock()
             mock_config.query = AsyncMock()
             mock_config.joern = AsyncMock()
@@ -61,23 +69,17 @@ class TestLifespan:
             mock_redis_client = AsyncMock()
             mock_redis_client_class.return_value = mock_redis_client
 
-            mock_session_manager = AsyncMock()
-            mock_session_manager.set_docker_cleanup_callback = (
-                MagicMock()
-            )  # Override to be sync
-            mock_session_manager_class.return_value = mock_session_manager
+            mock_sync_redis_client = MagicMock()
+            mock_sync_redis_client_class.return_value = mock_sync_redis_client
+
+            mock_codebase_tracker = AsyncMock()
+            mock_codebase_tracker_class.return_value = mock_codebase_tracker
 
             mock_git_manager = AsyncMock()
             mock_git_manager_class.return_value = mock_git_manager
 
             mock_cpg_generator = AsyncMock()
             mock_cpg_generator_class.return_value = mock_cpg_generator
-
-            mock_docker_orch = AsyncMock()
-            mock_docker_orch_class.return_value = mock_docker_orch
-
-            mock_query_executor = AsyncMock()
-            mock_query_executor_class.return_value = mock_query_executor
 
             # Test lifespan context manager
             async with lifespan(mock_mcp):
@@ -86,19 +88,25 @@ class TestLifespan:
                 mock_setup_logging.assert_called_with("INFO")
                 mock_makedirs.assert_called()
                 mock_redis_client.connect.assert_called_once()
-                mock_session_manager.set_docker_cleanup_callback.assert_called_once()
-                mock_cpg_generator.initialize.assert_called_once()
-                mock_query_executor.initialize.assert_called_once()
 
             # Verify shutdown calls
-            mock_query_executor.cleanup.assert_called_once()
-            mock_docker_orch.cleanup.assert_called_once()
             mock_redis_client.close.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_lifespan_initialization_failure(self):
         """Test lifespan with initialization failure"""
-        mock_mcp = AsyncMock()
+        class DummyMCP:
+            def __init__(self):
+                self.registered = {}
+
+            def tool(self):
+                def decorator(func):
+                    self.registered[func.__name__] = func
+                    return func
+
+                return decorator
+
+        mock_mcp = DummyMCP()
 
         with patch(
             "main.load_config", side_effect=Exception("Config load failed")
@@ -111,11 +119,24 @@ class TestLifespan:
     @pytest.mark.asyncio
     async def test_lifespan_redis_connection_failure(self):
         """Test lifespan with Redis connection failure"""
-        mock_mcp = AsyncMock()
+        class DummyMCP:
+            def __init__(self):
+                self.registered = {}
+
+            def tool(self):
+                def decorator(func):
+                    self.registered[func.__name__] = func
+                    return func
+
+                return decorator
+
+        mock_mcp = DummyMCP()
 
         with patch("main.load_config") as mock_load_config, patch(
             "main.RedisClient"
-        ) as mock_redis_client_class, patch("main.setup_logging"), patch(
+        ) as mock_redis_client_class, patch(
+            "main.SyncRedisClient"
+        ) as mock_sync_redis_client_class, patch("main.setup_logging"), patch(
             "os.makedirs"
         ), patch(
             "main.logger"
@@ -131,6 +152,9 @@ class TestLifespan:
                 side_effect=Exception("Redis connection failed")
             )
             mock_redis_client_class.return_value = mock_redis_client
+            mock_sync_redis_client = MagicMock()
+            mock_sync_redis_client.connect = MagicMock(side_effect=Exception("Redis connection failed"))
+            mock_sync_redis_client_class.return_value = mock_sync_redis_client
 
             with pytest.raises(Exception, match="Redis connection failed"):
                 async with lifespan(mock_mcp):

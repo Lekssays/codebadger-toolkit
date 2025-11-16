@@ -1,457 +1,153 @@
-# 🕷️ joern-mcp
+# 🦡 codebadger-toolkit
 
-A Model Context Protocol (MCP) server that provides AI assistants with static code analysis capabilities using [Joern](https://joern.io)'s Code Property Graph (CPG) technology.
-
-## Features
-
-- **Multi-Language Support**: Java, C/C++, JavaScript, Python, Go, Kotlin, C#, Ghidra, Jimple, PHP, Ruby, Swift
-- **Docker Isolation**: Each analysis session runs in a secure container
-- **GitHub Integration**: Analyze repositories directly from GitHub URLs
-- **Session-Based**: Persistent CPG sessions with automatic cleanup
-- **Redis-Backed**: Fast caching and session management
-- **Async Queries**: Non-blocking CPG generation and query execution
+A containerized Model Context Protocol (MCP) server providing static code analysis using Joern's Code Property Graph (CPG) technology with support for Java, C/C++, JavaScript, Python, Go, Kotlin, C#, Ghidra, Jimple, PHP, Ruby, and Swift.
 
 ## Quick Start
 
-### Prerequisites
+### Build and Run the Container
 
-- Python 3.8+
-- Docker
-- Redis
-- Git
-
-### Installation
-
-1. **Clone and install dependencies**:
 ```bash
-git clone https://github.com/Lekssays/joern-mcp.git
-cd joern-mcp
-pip install -r requirements.txt
+docker compose up --build
 ```
 
-2. **Setup (builds Joern image and starts Redis)**:
+The MCP server will be available at `http://localhost:4242`.
+
+### Stop the Service
+
 ```bash
-./setup.sh
+docker compose down
 ```
 
-3. **Configure** (optional):
-```bash
-cp config.example.yaml config.yaml
-# Edit config.yaml as needed
+## Integrations 
+
+### GitHub Copilot Integration
+
+Edit the MCP configuration file for VS Code (GitHub Copilot):
+
+**Path:**
+
+```
+~/.config/Code/User/mcp.json
 ```
 
-4. **Run the server**:
-```bash
-python main.py
-# Server will be available at http://localhost:4242
-```
-
-## Integration with GitHub Copilot
-
-The server uses **Streamable HTTP** transport for network accessibility and supports multiple concurrent clients.
-
-Add to your VS Code `settings.json`:
+**Example configuration:**
 
 ```json
 {
-  "github.copilot.advanced": {
-    "mcp": {
-      "servers": {
-        "joern-mcp": {
-          "url": "http://localhost:4242/mcp",
-        }
-      }
+  "inputs": [],
+  "servers": {
+    "codebadger-toolkit": {
+      "url": "http://localhost:4242/mcp",
+      "type": "http"
     }
   }
 }
 ```
 
-Make sure the server is running before using it with Copilot:
-```bash
-python main.py
+---
+
+### Claude Code Integration
+
+To integrate `codebadger-toolkit` into **Claude Desktop**, edit:
+
+**Path:**
+
+```
+Claude → Settings → Developer → Edit Config → claude_desktop_config.json
+```
+
+Add the following:
+
+```json
+{
+  "mcpServers": {
+    "codebadger-toolkit": {
+      "url": "http://localhost:4242/mcp",
+      "type": "http"
+    }
+  }
+}
 ```
 
 ## Available Tools
 
-### Core Tools
-
-- **`create_cpg_session`**: Initialize analysis session from local path or GitHub URL
-- **`run_cpgql_query`**: Execute synchronous CPGQL queries with JSON output
-- **`run_cpgql_query_async`**: Execute asynchronous queries with status tracking
-- **`get_query_status`**: Check status of asynchronously running queries
-- **`get_query_result`**: Retrieve results from completed queries
-- **`cleanup_queries`**: Clean up old completed query results
-- **`get_session_status`**: Check session state and metadata
-- **`list_sessions`**: View active sessions with filtering
-- **`close_session`**: Clean up session resources
-- **`cleanup_all_sessions`**: Clean up multiple sessions and containers
+### Core Tools (hash-based)
+- `generate_cpg`: Generate a CPG for a codebase (from local path or GitHub URL)
+- `get_cpg_status`: Get status and existence of a CPG by `codebase_hash`
+- `run_cpgql_query`: Execute CPGQL queries (synchronous)
+- `list_methods`: Discover methods/functions (by codebase)
+- `get_method_source`: Retrieve method source code
+- `list_calls`: Find function call relationships
+- `get_call_graph`: Build call graphs
+- `list_parameters`: Get parameter information
 
 ### Code Browsing Tools
-
-- **`get_codebase_summary`**: Get high-level overview of codebase (file count, method count, language)
-- **`list_files`**: List all source files with optional regex filtering
-- **`list_methods`**: Discover all methods/functions with filtering by name, file, or external status
-- **`get_method_source`**: Retrieve actual source code for specific methods
-- **`list_calls`**: Find function call relationships and dependencies
-- **`get_call_graph`**: Build call graphs (outgoing callees or incoming callers) with configurable depth
-- **`list_parameters`**: Get detailed parameter information for methods
-- **`find_literals`**: Search for hardcoded values (strings, numbers, API keys, etc)
-- **`get_code_snippet`**: Retrieve code snippets from files with line range
+- `get_codebase_summary`: Get codebase overview
+- `list_files`: List source files
+- `list_methods`: Discover methods/functions
+- `get_method_source`: Retrieve method source code
+- `list_calls`: Find function call relationships
+- `get_call_graph`: Build call graphs
+- `list_parameters`: Get parameter information
+- `find_literals`: Search for hardcoded values
+- `get_code_snippet`: Retrieve code snippets
 
 ### Security Analysis Tools
+- `find_taint_sources`: Locate external input points
+- `find_taint_sinks`: Locate dangerous sinks
+- `find_taint_flows`: Find dataflow paths
+- `find_argument_flows`: Find expression reuse
+- `check_method_reachability`: Check call graph connections
+- `list_taint_paths`: List detailed taint paths
+- `get_program_slice`: Build program slices
 
-- **`find_taint_sources`**: Locate likely external input points (taint sources)
-- **`find_taint_sinks`**: Locate dangerous sinks where tainted data could cause vulnerabilities
-- **`find_taint_flows`**: Find dataflow paths from sources to sinks using Joern dataflow primitives
-- **`find_argument_flows`**: Find flows where the exact same expression is passed to both source and sink calls
-- **`check_method_reachability`**: Check if one method can reach another through the call graph
-- **`list_taint_paths`**: List detailed taint flow paths from sources to sinks
-- **`get_program_slice`**: Build a program slice from a specific line or call
+## Contributing & Tests
 
-### Example Usage
+Thanks for contributing! Here's a quick guide to get started with running tests and contributing code.
 
-```python
-# Create session from GitHub
-{
-  "tool": "create_cpg_session",
-  "arguments": {
-    "source_type": "github",
-    "source_path": "https://github.com/user/repo",
-    "language": "java"
-  }
-}
+Prerequisites
+- Python 3.10+ (3.13 is used in CI)
+- Docker and Docker Compose (for integration tests)
 
-# Get codebase overview
-{
-  "tool": "get_codebase_summary",
-  "arguments": {
-    "session_id": "abc-123-def"
-  }
-}
-
-# List all methods in the codebase
-{
-  "tool": "list_methods",
-  "arguments": {
-    "session_id": "abc-123-def",
-    "include_external": false,
-    "limit": 50
-  }
-}
-
-# Get source code for a specific method
-{
-  "tool": "get_method_source",
-  "arguments": {
-    "session_id": "abc-123-def",
-    "method_name": "authenticate"
-  }
-}
-
-# Find what methods call a specific function
-{
-  "tool": "get_call_graph",
-  "arguments": {
-    "session_id": "abc-123-def",
-    "method_name": "execute_query",
-    "depth": 2,
-    "direction": "incoming"
-  }
-}
-
-# Search for hardcoded secrets
-{
-  "tool": "find_literals",
-  "arguments": {
-    "session_id": "abc-123-def",
-    "pattern": "(?i).*(password|secret|api_key).*",
-    "limit": 20
-  }
-}
-
-# Get code snippet from a file
-{
-  "tool": "get_code_snippet",
-  "arguments": {
-    "session_id": "abc-123-def",
-    "filename": "src/main.c",
-    "start_line": 10,
-    "end_line": 25
-  }
-}
-
-# Run custom CPGQL query
-{
-  "tool": "run_cpgql_query",
-  "arguments": {
-    "session_id": "abc-123-def",
-    "query": "cpg.method.name.l"
-  }
-}
-
-# Find potential security vulnerabilities
-{
-  "tool": "find_taint_sources",
-  "arguments": {
-    "session_id": "abc-123-def",
-    "language": "c"
-  }
-}
-
-# Check for data flows from sources to sinks
-{
-  "tool": "find_taint_flows",
-  "arguments": {
-    "session_id": "abc-123-def",
-    "source_patterns": ["getenv", "fgets"],
-    "sink_patterns": ["system", "sprintf"]
-  }
-}
-
-# Find argument flows between function calls
-{
-  "tool": "find_argument_flows",
-  "arguments": {
-    "session_id": "abc-123-def",
-    "source_name": "validate_input",
-    "sink_name": "process_data",
-    "arg_index": 0
-  }
-}
-
-# Get detailed taint paths
-{
-  "tool": "list_taint_paths",
-  "arguments": {
-    "session_id": "abc-123-def",
-    "source_pattern": "getenv",
-    "sink_pattern": "system",
-    "max_paths": 5
-  }
-}
-
-# Build program slice for security analysis
-{
-  "tool": "get_program_slice",
-  "arguments": {
-    "session_id": "abc-123-def",
-    "filename": "main.c",
-    "line_number": 42,
-    "call_name": "memcpy"
-  }
-}
-```
-
-### Security Analysis Capabilities
-
-The security analysis tools provide comprehensive vulnerability detection including:
-
-**Taint Analysis:**
-- Source identification: `find_taint_sources` locates external input points
-- Sink identification: `find_taint_sinks` finds dangerous operations
-- Flow analysis: `find_taint_flows` traces data from sources to sinks
-- Argument flow analysis: `find_argument_flows` finds exact expression reuse between calls
-- Path enumeration: `list_taint_paths` provides detailed propagation chains
-
-**Program Slicing:**
-- Backward slicing: `get_program_slice` shows all code affecting a specific operation
-- Data dependencies: Variable assignments and data flow tracking
-- Control dependencies: Conditional statements affecting execution
-
-**Reachability Analysis:**
-- Method connectivity: `check_method_reachability` verifies call graph connections
-- Impact analysis: Understand potential execution paths
-
-## Configuration
-
-Key settings in `config.yaml`:
-
-```yaml
-server:
-  host: 0.0.0.0
-  port: 4242
-  log_level: INFO
-
-redis:
-  host: localhost
-  port: 6379
-
-sessions:
-  ttl: 3600                # Session timeout (seconds)
-  max_concurrent: 50       # Max concurrent sessions
-
-cpg:
-  generation_timeout: 600  # CPG generation timeout (seconds)
-  supported_languages: [java, c, cpp, javascript, python, go, kotlin, csharp, ghidra, jimple, php, ruby, swift]
-```
-
-Environment variables override config file settings (e.g., `MCP_HOST`, `REDIS_HOST`, `SESSION_TTL`).
-
-## Example CPGQL Queries
-
-**Find all methods:**
-```scala
-cpg.method.name.l
-```
-
-**Find hardcoded secrets:**
-```scala
-cpg.literal.code("(?i).*(password|secret|api_key).*").l
-```
-
-**Find SQL injection risks:**
-```scala
-cpg.call.name(".*execute.*").where(_.argument.isLiteral.code(".*SELECT.*")).l
-```
-
-**Find complex methods:**
-```scala
-cpg.method.filter(_.cyclomaticComplexity > 10).l
-```
-
-## Architecture
-
-- **FastMCP Server**: Built on FastMCP 2.12.4 framework with **Streamable HTTP** transport
-- **HTTP Transport**: Network-accessible API supporting multiple concurrent clients
-- **Docker Containers**: One isolated Joern container per session
-- **Redis**: Session state and query result caching
-- **Async Processing**: Non-blocking CPG generation
-- **CPG Caching**: Reuse CPGs for identical source/language combinations
-
-## Development
-
-### Project Structure
-
-```
-joern-mcp/
-├── src/
-│   ├── services/       # Session, Docker, Git, CPG, Query services
-│   ├── tools/          # MCP tool definitions
-│   ├── utils/          # Redis, logging, validators
-│   └── models.py       # Data models
-├── playground/         # Test codebases and CPGs
-├── main.py            # Server entry point
-├── config.yaml        # Configuration
-└── requirements.txt   # Dependencies
-```
-
-### Running Tests
+Local development
+1. Create a virtual environment and install dependencies
 
 ```bash
-# Install dev dependencies
-pip install -r requirements.txt
-
-# Run tests
-pytest
-
-# Run with coverage
-pytest --cov=src --cov-report=html
-```
-
-### Code Quality
-
-```bash
-# Format
-black src/ tests/
-isort src/ tests/
-
-# Lint
-flake8 src/ tests/
-mypy src/
-```
-
-## Troubleshooting
-
-**Setup issues:**
-```bash
-# Re-run setup to rebuild and restart services
-./setup.sh
-```
-
-**Docker issues:**
-```bash
-# Verify Docker is running
-docker ps
-
-# Check Joern image
-docker images | grep joern
-
-# Check Redis container
-docker ps | grep joern-redis
-```
-
-**Redis connection issues:**
-```bash
-# Test Redis connection
-docker exec joern-redis redis-cli ping
-
-# Check Redis logs
-docker logs joern-redis
-
-# Restart Redis
-docker restart joern-redis
-```
-
-**Server connectivity:**
-```bash
-# Test server is running
-curl http://localhost:4242/health
-
-# Check server logs for errors
-python main.py
-```
-
-**Loading large projects:**
-```yaml
-joern:
-  binary_path: ${JOERN_BINARY_PATH:joern}
-  memory_limit: ${JOERN_MEMORY_LIMIT:16g}
-  java_opts: ${JOERN_JAVA_OPTS:-Xmx16G -Xms8G -XX:+UseG1GC -Dfile.encoding=UTF-8}
-```
-
-**Debug logging:**
-```bash
-export MCP_LOG_LEVEL=DEBUG
-python main.py
-```
-
-## Contributing
-
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for:
-
-- **Getting started** with development setup
-- **Code style** and quality guidelines
-- **Testing** requirements and best practices
-- **Submitting changes** through pull requests
-- **Reporting issues** and feature requests
-- **Documentation** standards
-
-Quick start for contributors:
-
-```bash
-git clone https://github.com/YOUR_USERNAME/joern-mcp.git
-cd joern-mcp
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-./setup.sh
-
-# Create feature branch
-git checkout -b feature/your-feature
-
-# Make changes and run tests
-pytest && black . && flake8
-
-# Submit pull request
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
+2. Run unit tests
 
-## Acknowledgments
+```bash
+pytest -q
+```
 
-- [Joern](https://github.com/joernio/joern) - Static analysis platform
-- [FastMCP](https://github.com/jlowin/fastmcp) - MCP framework
-- [Model Context Protocol](https://modelcontextprotocol.io/) - MCP specification
+3. Run integration tests (requires Docker Compose)
 
----
-Built with ❤️ in Doha 🇶🇦
+```bash
+docker compose up --build -d
+pytest -q tests/integration
+docker compose down
+```
+
+4. Run all tests
+
+```bash
+pytest -q
+```
+
+Please follow the repository conventions and open a PR with a clear changelog and tests for changes that affect behavior.
+
+## Configuration
+
+Optional configuration via `config.yaml` (copy from `config.example.yaml`).
+
+Key settings:
+- Server host/port
+- Redis settings
+- Session timeouts
+- CPG generation settings
+
+

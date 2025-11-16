@@ -56,9 +56,6 @@ class TestLoadConfig:
             "REDIS_DB": "2",
             "JOERN_BINARY_PATH": "/usr/bin/joern",
             "JOERN_MEMORY_LIMIT": "4g",
-            "SESSION_TTL": "7200",
-            "SESSION_IDLE_TIMEOUT": "1800",
-            "MAX_CONCURRENT_SESSIONS": "20",
             "CPG_GENERATION_TIMEOUT": "1200",
             "MAX_REPO_SIZE_MB": "1000",
             "QUERY_TIMEOUT": "60",
@@ -80,9 +77,6 @@ class TestLoadConfig:
             assert config.redis.db == 2
             assert config.joern.binary_path == "/usr/bin/joern"
             assert config.joern.memory_limit == "4g"
-            assert config.sessions.ttl == 7200
-            assert config.sessions.idle_timeout == 1800
-            assert config.sessions.max_concurrent == 20
             assert config.cpg.generation_timeout == 1200
             assert config.cpg.max_repo_size_mb == 1000
             assert config.query.timeout == 60
@@ -106,9 +100,6 @@ class TestLoadConfig:
             assert config.redis.db == 0
             assert config.joern.binary_path == "joern"
             assert config.joern.memory_limit == "4g"
-            assert config.sessions.ttl == 3600
-            assert config.sessions.idle_timeout == 1800
-            assert config.sessions.max_concurrent == 10
             assert config.cpg.generation_timeout == 600
             assert config.cpg.max_repo_size_mb == 500
             assert config.query.timeout == 30
@@ -186,7 +177,6 @@ class TestDictToConfig:
                 "db": 1,
             },
             "joern": {"binary_path": "/usr/bin/joern", "memory_limit": "8g"},
-            "sessions": {"ttl": 7200, "idle_timeout": 3600, "max_concurrent": 20},
             "cpg": {"generation_timeout": 1200, "max_repo_size_mb": 1000},
             "query": {"timeout": 60, "cache_enabled": False, "cache_ttl": 600},
             "storage": {"workspace_root": "/tmp/custom", "cleanup_on_shutdown": False},
@@ -203,9 +193,6 @@ class TestDictToConfig:
         assert config.redis.db == 1
         assert config.joern.binary_path == "/usr/bin/joern"
         assert config.joern.memory_limit == "8g"
-        assert config.sessions.ttl == 7200
-        assert config.sessions.idle_timeout == 3600
-        assert config.sessions.max_concurrent == 20
         assert config.cpg.generation_timeout == 1200
         assert config.cpg.max_repo_size_mb == 1000
         assert config.query.timeout == 60

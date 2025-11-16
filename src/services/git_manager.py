@@ -25,7 +25,7 @@ class GitManager:
         self.repos_dir = os.path.join(workspace_root, "repos")
         os.makedirs(self.repos_dir, exist_ok=True)
 
-    async def clone_repository(
+    def clone_repository(
         self,
         repo_url: str,
         target_path: str,
@@ -50,7 +50,7 @@ class GitManager:
 
             # Clone in a thread pool (git operations are blocking)
             loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
+            loop.run_in_executor(
                 None, self._do_clone, auth_url, source_path, branch
             )
 
@@ -73,7 +73,7 @@ class GitManager:
         except Exception as e:
             raise GitOperationError(f"Git clone failed: {str(e)}")
 
-    async def validate_repository(self, repo_url: str) -> bool:
+    def validate_repository(self, repo_url: str) -> bool:
         """Validate that repository exists and is accessible"""
         try:
             validate_github_url(repo_url)
@@ -83,7 +83,7 @@ class GitManager:
             logger.error(f"Repository validation failed: {e}")
             return False
 
-    async def get_repository_info(self, repo_url: str) -> Dict:
+    def get_repository_info(self, repo_url: str) -> Dict:
         """Get repository information"""
         try:
             validate_github_url(repo_url)
@@ -119,7 +119,7 @@ class GitManager:
             logger.error(f"Failed to parse GitHub URL: {e}")
             raise GitOperationError(f"Invalid GitHub URL: {str(e)}")
 
-    async def cleanup_repository(self, target_path: str):
+    def cleanup_repository(self, target_path: str):
         """Clean up cloned repository"""
         try:
             if os.path.exists(target_path):

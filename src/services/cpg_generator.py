@@ -10,6 +10,7 @@ from typing import AsyncIterator, Dict, Optional
 
 from ..exceptions import CPGGenerationError
 from ..models import CPGConfig, Config
+from .joern_client import JoernServerClient
 
 logger = logging.getLogger(__name__)
 
@@ -35,27 +36,29 @@ class CPGGenerator:
     }
 
     def __init__(
-        self, config: Config, docker_orchestrator=None
+        self, config: Config, joern_server_manager: Optional['JoernServerManager'] = None, docker_orchestrator=None
     ):
         self.config = config
+        self.joern_server_manager = joern_server_manager
         # docker_orchestrator is ignored - we run Joern CLI directly
 
-    async def initialize(self):
+    def initialize(self):
         """Initialize CPG Generator (no-op in container)"""
         logger.info("CPG Generator initialized (running locally)")
 
-    async def generate_cpg(
-        self, source_path: str, language: str, cpg_path: str
-    ) -> str:
+    def generate_cpg(
+        self, source_path: str, language: str, cpg_path: str, codebase_hash: str
+    ) -> tuple[str, Optional[int]]:
         """Generate CPG from source code using Joern CLI directly
         
         Args:
             source_path: Path to source code (e.g., /app/playground/codebases/<hash>/)
             language: Programming language
             cpg_path: Full path where CPG should be stored (e.g., /app/playground/cpgs/<hash>/cpg.bin)
+            codebase_hash: The codebase identifier for server management
             
         Returns:
-            Path to generated CPG file
+            Tuple of (path to generated CPG file, joern server port or None)
         """
         try:
             logger.info(f"Starting CPG generation for {source_path} -> {cpg_path}")
@@ -96,7 +99,7 @@ class CPGGenerator:
 
             # Execute with timeout
             try:
-                result = await asyncio.wait_for(
+                result = asyncio.wait_for(
                     self._exec_command_async(cmd_args, env),
                     timeout=self.config.cpg.generation_timeout,
                 )
@@ -110,9 +113,27 @@ class CPGGenerator:
                     raise CPGGenerationError(error_msg)
 
                 # Validate CPG was created on disk
-                if await self._validate_cpg_async(cpg_path):
+                if self._validate_cpg_async(cpg_path):
                     logger.info(f"CPG generation completed: {cpg_path}")
-                    return cpg_path
+                    
+                    # Spawn Joern server and load CPG if manager is available
+                    joern_port = None
+                    if self.joern_server_manager:
+                        try:
+                            logger.info(f"Spawning Joern server for codebase {codebase_hash}")
+                            joern_port = self.joern_server_manager.spawn_server(codebase_hash)
+                            
+                            logger.info(f"Loading CPG into Joern server on port {joern_port}")
+                            if self.joern_server_manager.load_cpg(codebase_hash, cpg_path):
+                                logger.info("CPG loaded into Joern server successfully")
+                            else:
+                                logger.warning("Failed to load CPG into Joern server")
+                                # Don't fail the whole operation, but log the issue
+                        except Exception as e:
+                            logger.error(f"Failed to setup Joern server for {codebase_hash}: {e}")
+                            # Don't fail the whole operation, but the CPG is still usable
+                    
+                    return cpg_path, joern_port
                 else:
                     error_msg = "CPG file was not created"
                     logger.error(f"{error_msg}: {result[:2000]}")
@@ -132,7 +153,7 @@ class CPGGenerator:
             logger.error(error_msg)
             raise CPGGenerationError(error_msg)
 
-    async def _exec_command_async(self, cmd_args: list, env: dict) -> str:
+    def _exec_command_async(self, cmd_args: list, env: dict) -> str:
         """Execute command asynchronously using subprocess"""
         loop = asyncio.get_event_loop()
 
@@ -148,9 +169,9 @@ class CPGGenerator:
             output = result.stdout + result.stderr
             return output
 
-        return await loop.run_in_executor(None, _exec_sync)
+        return loop.run_in_executor(None, _exec_sync)
 
-    async def _validate_cpg_async(self, cpg_path: str) -> bool:
+    def _validate_cpg_async(self, cpg_path: str) -> bool:
         """Validate that CPG file was created successfully and is not empty"""
         try:
             # Check if file exists
@@ -178,6 +199,6 @@ class CPGGenerator:
             logger.error(f"CPG validation failed: {e}")
             return False
 
-    async def cleanup(self):
+    def cleanup(self):
         """Cleanup (no-op in container)"""
         logger.info("CPG Generator cleanup (no-op)")

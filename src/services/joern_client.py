@@ -2,13 +2,12 @@
 HTTP client for communicating with Joern server API
 """
 
-import asyncio
 import json
 import logging
 import time
 from typing import Dict, Optional, Any
 
-import aiohttp
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -16,175 +15,137 @@ logger = logging.getLogger(__name__)
 class JoernServerClient:
     """Client for Joern server HTTP API"""
 
-    def __init__(self, host: str = "localhost", port: int = 8080):
+    def __init__(self, host: str = "localhost", port: int = 8080, username: Optional[str] = None, password: Optional[str] = None):
         """
         Initialize Joern server client
         
         Args:
             host: Server hostname
             port: Server port
+            username: Optional authentication username
+            password: Optional authentication password
         """
         self.host = host
         self.port = port
         self.base_url = f"http://{host}:{port}"
-        self._session: Optional[aiohttp.ClientSession] = None
+        self.auth = (username, password) if username and password else None
 
-    async def initialize(self):
-        """Initialize the HTTP client session"""
-        if not self._session:
-            self._session = aiohttp.ClientSession()
-            logger.info(f"Initialized Joern server client for {self.base_url}")
+    # Legacy async submission methods removed: use execute_query() for synchronous API
 
-    async def close(self):
-        """Close the HTTP client session"""
-        if self._session:
-            await self._session.close()
-            self._session = None
-            logger.info("Closed Joern server client")
-
-    async def submit_query(self, query: str) -> str:
-        """
-        Submit a query to the Joern server
-        
-        Args:
-            query: The CPGQL query to execute
-            
-        Returns:
-            UUID of the query for retrieving results
-        """
-        if not self._session:
-            await self.initialize()
-
-        try:
-            url = f"{self.base_url}/query"
-            payload = {"query": query}
-            
-            logger.debug(f"Submitting query to {url}: {query[:100]}...")
-            
-            async with self._session.post(url, json=payload) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    raise Exception(f"Query submission failed: {response.status} - {error_text}")
-                
-                result = await response.json()
-                query_uuid = result.get("uuid")
-                
-                if not query_uuid:
-                    raise Exception("Server did not return a query UUID")
-                
-                logger.info(f"Query submitted successfully, UUID: {query_uuid}")
-                return query_uuid
-                
-        except aiohttp.ClientError as e:
-            logger.error(f"HTTP error submitting query: {e}")
-            raise Exception(f"Failed to submit query: {str(e)}")
-        except Exception as e:
-            logger.error(f"Error submitting query: {e}")
-            raise
-
-    async def get_result(self, query_uuid: str) -> Dict[str, Any]:
-        """
-        Get the result of a query by UUID
-        
-        Args:
-            query_uuid: UUID of the query
-            
-        Returns:
-            Dictionary with keys: success (bool), stdout (str), stderr (str)
-        """
-        if not self._session:
-            await self.initialize()
-
-        try:
-            url = f"{self.base_url}/result/{query_uuid}"
-            
-            logger.debug(f"Fetching result for query {query_uuid}")
-            
-            async with self._session.get(url) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    raise Exception(f"Result fetch failed: {response.status} - {error_text}")
-                
-                result = await response.json()
-                
-                logger.debug(f"Query {query_uuid} result: success={result.get('success')}")
-                return result
-                
-        except aiohttp.ClientError as e:
-            logger.error(f"HTTP error fetching result: {e}")
-            raise Exception(f"Failed to fetch result: {str(e)}")
-        except Exception as e:
-            logger.error(f"Error fetching result: {e}")
-            raise
-
-    async def execute_query(
+    def execute_query(
         self,
         query: str,
-        timeout: int = 60,
-        poll_interval: float = 0.5
+        timeout: int = 60
     ) -> Dict[str, Any]:
         """
-        Execute a query and wait for the result
+        Execute a query synchronously using the /query-sync endpoint
         
         Args:
             query: The CPGQL query to execute
             timeout: Maximum time to wait for result (seconds)
-            poll_interval: Time between polling attempts (seconds)
             
         Returns:
             Dictionary with keys: success (bool), stdout (str), stderr (str)
         """
-        start_time = time.time()
-        
-        # Submit query
-        query_uuid = await self.submit_query(query)
-        
-        # Poll for result
-        while True:
-            elapsed = time.time() - start_time
-            if elapsed > timeout:
-                raise TimeoutError(f"Query {query_uuid} timed out after {timeout}s")
-            
-            # Get result
-            result = await self.get_result(query_uuid)
-            
-            # Check if query is complete
-            success = result.get("success")
-            if success == "true" or success is True:
-                logger.info(f"Query {query_uuid} completed successfully")
-                return result
-            elif success == "false" or success is False:
-                # Query completed with error
-                logger.error(f"Query {query_uuid} failed: {result.get('stderr', 'Unknown error')}")
-                return result
-            
-            # Result not ready yet, wait and retry
-            await asyncio.sleep(poll_interval)
-
-    async def health_check(self) -> bool:
-        """
-        Check if the Joern server is healthy
-        
-        Returns:
-            True if server is responding, False otherwise
-        """
-        if not self._session:
-            await self.initialize()
-
         try:
-            # Try to query the root endpoint or a simple query
-            url = self.base_url
-            async with self._session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as response:
-                return response.status == 200
+            url = f"{self.base_url}/query-sync"
+            payload = {"query": query}
+            
+            logger.debug(f"Executing query synchronously at {url}: {query[:100]}...")
+            
+            response = requests.post(url, json=payload, timeout=timeout, auth=self.auth)
+            
+            if response.status_code != 200:
+                error_text = response.text
+                logger.error(f"Query execution failed: {response.status_code} - {error_text}")
+                return {
+                    "success": False,
+                    "stdout": "",
+                    "stderr": f"HTTP {response.status_code}: {error_text}"
+                }
+            
+            result = response.json()
+            
+            # The response should have success, stdout, stderr keys
+            success = result.get("success", False)
+            stdout = result.get("stdout", "")
+            stderr = result.get("stderr", "")
+            
+            logger.debug(f"Query executed: success={success}")
+            if not success:
+                logger.error(f"Query failed: {stderr}")
+            
+            return {
+                "success": success,
+                "stdout": stdout,
+                "stderr": stderr
+            }
+            
+        except requests.Timeout:
+            logger.error(f"Query timeout after {timeout}s")
+            return {
+                "success": False,
+                "stdout": "",
+                "stderr": f"Query timeout after {timeout}s"
+            }
+        except requests.RequestException as e:
+            logger.error(f"HTTP error executing query: {e}")
+            return {
+                "success": False,
+                "stdout": "",
+                "stderr": f"HTTP error: {str(e)}"
+            }
         except Exception as e:
-            logger.warning(f"Joern server health check failed: {e}")
+            logger.error(f"Error executing query: {e}")
+            return {
+                "success": False,
+                "stdout": "",
+                "stderr": f"Error: {str(e)}"
+            }
+
+    def load_cpg(self, cpg_path: str, timeout: int = 120) -> bool:
+        """
+        Load a CPG file into the Joern server
+        
+        Args:
+            cpg_path: Path to the CPG file to load
+            timeout: Maximum time to wait for loading (seconds)
+            
+        Returns:
+            True if CPG was loaded successfully, False otherwise
+        """
+        try:
+            # Prefer importCpg when loading a pre-built cpg.bin file
+            # Use importCpg which takes a path to a saved CPG file
+            import os
+            project_name = os.path.basename(cpg_path)
+            query = f'importCpg("{cpg_path}")'
+            logger.info(f"Loading CPG from {cpg_path}")
+            
+            result = self.execute_query(query, timeout=timeout)
+            
+            if result.get("success"):
+                logger.info(f"CPG loaded successfully from {cpg_path}")
+                # Ensure the loaded CPG is opened for queries by calling open(project)
+                try:
+                    open_query = f'open("{project_name}")'
+                    open_result = self.execute_query(open_query, timeout=10)
+                    if open_result.get("success"):
+                        logger.info(f"Opened project {project_name} for queries")
+                        return True
+                    else:
+                        logger.warning(f"Failed to open project {project_name}: {open_result.get('stderr')}")
+                        # Still return True because importCpg succeeded, but queries may fail
+                        return True
+                except Exception:
+                    # If open fails, still return True because import succeeded
+                    return True
+            else:
+                logger.error(f"Failed to load CPG from {cpg_path}: {result.get('stderr')}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error loading CPG from {cpg_path}: {e}")
             return False
 
-    def __del__(self):
-        """Cleanup on deletion"""
-        if self._session and not self._session.closed:
-            try:
-                # Try to close session gracefully
-                asyncio.get_event_loop().create_task(self.close())
-            except Exception:
-                pass
+

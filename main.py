@@ -18,9 +18,12 @@ from src.services import (
     CodebaseTracker,
     GitManager,
     CPGGenerator,
+    JoernServerClient,
+    JoernServerManager,
+    PortManager,
     QueryExecutor
 )
-from src.utils import RedisClient, setup_logging
+from src.utils import RedisClient, SyncRedisClient, setup_logging
 from src.tools import register_tools
 
 # Version information - bump this when releasing new versions
@@ -47,29 +50,39 @@ async def lifespan(mcp: FastMCP):
     logger.info("Created required directories")
     
     try:
-        # Initialize Redis
+        # Initialize Redis clients
         redis_client = RedisClient(config.redis)
         await redis_client.connect()
-        logger.info("Redis client connected")
+        
+        sync_redis_client = SyncRedisClient(config.redis)
+        sync_redis_client.connect()
+        
+        logger.info("Redis clients connected")
         
         # Initialize services
         services['config'] = config
         services['redis'] = redis_client
-        services['codebase_tracker'] = CodebaseTracker(redis_client)
+        services['sync_redis'] = sync_redis_client
+        services['codebase_tracker'] = CodebaseTracker(sync_redis_client)
         services['git_manager'] = GitManager(config.storage.workspace_root)
         
+        # Initialize port manager for Joern servers
+        services['port_manager'] = PortManager()
+        
+        # Initialize Joern server manager
+        services['joern_server_manager'] = JoernServerManager(
+            joern_binary_path=config.joern.binary_path
+        )
+        
         # Initialize CPG generator (runs Joern CLI directly in container)
-        services['cpg_generator'] = CPGGenerator(config=config)
+        services['cpg_generator'] = CPGGenerator(config=config, joern_server_manager=services['joern_server_manager'])
         # Skip initialize() - no Docker needed
         
-        # Initialize query executor (runs Joern servers as local subprocesses)
-        services['query_executor'] = QueryExecutor(
-            config.query,
-            config.joern,
-            redis_client,
-            docker_orchestrator=None  # Will start Joern servers directly
-        )
-        # Skip initialize() - no Docker needed
+        # Initialize query executor with Joern server manager
+        services['query_executor'] = QueryExecutor(services['joern_server_manager'], config=config.query)
+        
+        # Register MCP tools now that services are initialized
+        register_tools(mcp, services)
         
         logger.info("All services initialized")
         logger.info("CodeBadger Toolkit Server is ready")
@@ -79,12 +92,9 @@ async def lifespan(mcp: FastMCP):
         # Shutdown
         logger.info("Shutting down CodeBadger Toolkit Server")
         
-        # Cleanup query executor (stops any running Joern server subprocesses)
-        if 'query_executor' in services:
-            await services['query_executor'].cleanup()
-        
         # Close connections
         await redis_client.close()
+        sync_redis_client.close()
         
         logger.info("CodeBadger Toolkit Server shutdown complete")
         
@@ -99,8 +109,8 @@ mcp = FastMCP(
     lifespan=lifespan
 )
 
-# Register MCP tools
-register_tools(mcp, services)
+# Note: Tools are registered inside the lifespan function
+# register_tools(mcp, services)
 
 
 # Health check endpoint

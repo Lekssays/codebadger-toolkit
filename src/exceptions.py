@@ -9,16 +9,8 @@ class JoernMCPException(Exception):
     pass
 
 
-class SessionNotFoundError(JoernMCPException):
-    """Session does not exist"""
-
-    pass
-
-
-class SessionNotReadyError(JoernMCPException):
-    """Session is not in ready state"""
-
-    pass
+# Alias for backward compatibility
+JoernMCPError = JoernMCPException
 
 
 class CPGGenerationError(JoernMCPException):
@@ -29,12 +21,6 @@ class CPGGenerationError(JoernMCPException):
 
 class QueryExecutionError(JoernMCPException):
     """Query execution failed"""
-
-    pass
-
-
-class DockerError(JoernMCPException):
-    """Docker operation failed"""
 
     pass
 

@@ -3,7 +3,7 @@ Utilities package
 """
 
 from .logging import get_logger, setup_logging
-from .redis_client import RedisClient
+from .redis_client import RedisClient, SyncRedisClient
 from .validators import (
     hash_query,
     sanitize_path,
@@ -18,6 +18,7 @@ from .validators import (
 
 __all__ = [
     "RedisClient",
+    "SyncRedisClient",
     "validate_source_type",
     "validate_language",
     "validate_codebase_hash",

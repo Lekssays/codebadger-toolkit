@@ -23,12 +23,10 @@ class SessionStatus(str, Enum):
     READY = "ready"
     ERROR = "error"
 
-
 @dataclass
 class CodebaseInfo:
-    """Codebase tracking data model - uses hash as identifier"""
 
-    hash: str  # The codebase hash (cpg_cache_key)
+    codebase_hash: str  # The codebase hash (cpg_cache_key)
     source_type: str  # "local" or "github"
     source_path: str  # Original path or GitHub URL
     language: str  # Programming language
@@ -42,7 +40,7 @@ class CodebaseInfo:
         """Convert codebase info to dictionary"""
         import json
         return {
-            "hash": self.hash,
+            "hash": self.codebase_hash,
             "source_type": self.source_type,
             "source_path": self.source_path,
             "language": self.language,
@@ -66,7 +64,7 @@ class CodebaseInfo:
                 metadata = {}
         
         return cls(
-            hash=data["hash"],
+            codebase_hash=data["hash"],
             source_type=data.get("source_type", ""),
             source_path=data.get("source_path", ""),
             language=data.get("language", ""),
@@ -106,6 +104,10 @@ class JoernConfig:
     binary_path: str = "joern"
     memory_limit: str = "4g"
     java_opts: str = "-Xmx4G -Xms2G -XX:+UseG1GC -Dfile.encoding=UTF-8"
+    server_host: str = "localhost"
+    server_port: int = 8080
+    server_auth_username: Optional[str] = None
+    server_auth_password: Optional[str] = None
 
 
 @dataclass
@@ -129,191 +131,16 @@ class RedisConfig:
 
 
 @dataclass
-class SessionConfig:
-    """Session management configuration"""
-
-    ttl: int = 3600  # 1 hour
-    idle_timeout: int = 1800  # 30 minutes
-    max_concurrent: int = 100
-
-
-@dataclass
 class CPGConfig:
     """CPG generation configuration"""
 
     generation_timeout: int = 600  # 10 minutes
     max_repo_size_mb: int = 500
-    supported_languages: List[str] = field(
-        default_factory=lambda: [
-            "java",
-            "c",
-            "cpp",
-            "javascript",
-            "python",
-            "go",
-            "kotlin",
-            "csharp",
-            "ghidra",
-            "jimple",
-            "php",
-            "ruby",
-            "swift",
-        ]
-    )
-    # Exclusion patterns for CPG generation to focus on core functionality
-    exclusion_patterns: List[str] = field(
-        default_factory=lambda: [
-            # Hidden files and directories (starting with .)
-            ".*/\\..*",
-            "\\..*",
-            # Test and fuzzing directories (both root level and nested, with wildcards)
-            ".*/test.*",
-            "test.*",
-            ".*/fuzz.*",
-            "fuzz.*",
-            ".*/Testing.*",
-            "Testing.*",
-            ".*/spec.*",
-            "spec.*",
-            ".*/__tests__/.*",
-            "__tests__/.*",
-            ".*/e2e.*",
-            "e2e.*",
-            ".*/integration.*",
-            "integration.*",
-            ".*/unit.*",
-            "unit.*",
-            ".*/benchmark.*",
-            "benchmark.*",
-            ".*/perf.*",
-            "perf.*",
-            # Documentation and examples (both root level and nested, with wildcards)
-            ".*/docs?/.*",
-            "docs?/.*",
-            ".*/documentation.*",
-            "documentation.*",
-            ".*/example.*",
-            "example.*",
-            ".*/sample.*",
-            "sample.*",
-            ".*/demo.*",
-            "demo.*",
-            ".*/tutorial.*",
-            "tutorial.*",
-            ".*/guide.*",
-            "guide.*",
-            # Build and development artifacts
-            ".*/build.*/.*",
-            ".*_build/.*",
-            ".*/target/.*",
-            ".*/out/.*",
-            ".*/dist/.*",
-            ".*/bin/.*",
-            ".*/obj/.*",
-            ".*/Debug/.*",
-            ".*/Release/.*",
-            ".*/cmake/.*",
-            ".*/m4/.*",
-            ".*/autom4te.*/.*",
-            ".*/autotools/.*",
-            # Version control and dependencies
-            ".*/\\.git/.*",
-            ".*/\\.svn/.*",
-            ".*/\\.hg/.*",
-            ".*/\\.deps/.*",
-            ".*/node_modules/.*",
-            ".*/vendor/.*",
-            ".*/third_party/.*",
-            ".*/extern/.*",
-            ".*/external/.*",
-            ".*/packages/.*",
-            # Performance and profiling
-            ".*/benchmark.*/.*",
-            ".*/perf.*/.*",
-            ".*/profile.*/.*",
-            ".*/bench/.*",
-            # Tools and scripts
-            ".*/tool.*/.*",
-            ".*/script.*/.*",
-            ".*/utils/.*",
-            ".*/util/.*",
-            ".*/helper.*/.*",
-            ".*/misc/.*",
-            # Language-specific binding/wrapper directories
-            ".*/python/.*",
-            ".*/java/.*",
-            ".*/ruby/.*",
-            ".*/perl/.*",
-            ".*/php/.*",
-            ".*/csharp/.*",
-            ".*/dotnet/.*",
-            ".*/go/.*",
-            # Generated and temporary files
-            ".*/generated/.*",
-            ".*/gen/.*",
-            ".*/temp/.*",
-            ".*/tmp/.*",
-            ".*/cache/.*",
-            ".*/\\.cache/.*",
-            ".*/log.*/.*",
-            ".*/logs/.*",
-            ".*/result.*/.*",
-            ".*/results/.*",
-            ".*/output/.*",
-            # Configuration and metadata files (by extension)
-            ".*\\.md$",
-            ".*\\.txt$",
-            ".*\\.xml$",
-            ".*\\.json$",
-            ".*\\.yaml$",
-            ".*\\.yml$",
-            ".*\\.toml$",
-            ".*\\.ini$",
-            ".*\\.cfg$",
-            ".*\\.conf$",
-            ".*\\.properties$",
-            ".*\\.cmake$",
-            ".*Makefile.*",
-            ".*makefile.*",
-            ".*configure.*",
-            ".*\\.am$",
-            ".*\\.in$",
-            ".*\\.ac$",
-            ".*\\.log$",
-            ".*\\.cache$",
-            ".*\\.lock$",
-            ".*\\.tmp$",
-            ".*\\.bak$",
-            ".*\\.orig$",
-            ".*\\.swp$",
-            ".*~$",
-            # IDE and editor files
-            ".*/\\.vscode/.*",
-            ".*/\\.idea/.*",
-            ".*/\\.eclipse/.*",
-            ".*\\.DS_Store$",
-            ".*Thumbs\\.db$",
-        ]
-    )
-    # Languages that support exclusion patterns
-    languages_with_exclusions: List[str] = field(
-        default_factory=lambda: [
-            "c",
-            "cpp",
-            "java",
-            "javascript",
-            "python",
-            "go",
-            "kotlin",
-            "csharp",
-            "php",
-            "ruby",
-        ]
-    )
-    # Pre-defined taint source/sink patterns per language. Keys are language names
-    # and values are lists of regex patterns (strings) used to detect calls/identifiers.
-    taint_sources: Dict[str, List[str]] = field(default_factory=lambda: {})
-    taint_sinks: Dict[str, List[str]] = field(default_factory=lambda: {})
+    supported_languages: Optional[List[str]] = None
+    exclusion_patterns: Optional[List[str]] = None
+    languages_with_exclusions: Optional[List[str]] = None
+    taint_sources: Optional[Dict[str, List[str]]] = None
+    taint_sinks: Optional[Dict[str, List[str]]] = None
 
 
 @dataclass
@@ -340,7 +167,6 @@ class Config:
     server: ServerConfig = field(default_factory=ServerConfig)
     redis: RedisConfig = field(default_factory=RedisConfig)
     joern: JoernConfig = field(default_factory=JoernConfig)
-    sessions: SessionConfig = field(default_factory=SessionConfig)
     cpg: CPGConfig = field(default_factory=CPGConfig)
     query: QueryConfig = field(default_factory=QueryConfig)
     storage: StorageConfig = field(default_factory=StorageConfig)

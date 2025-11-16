@@ -6,13 +6,10 @@ import pytest
 
 from src.exceptions import (
     CPGGenerationError,
-    DockerError,
     GitOperationError,
     JoernMCPError,
     QueryExecutionError,
     ResourceLimitError,
-    SessionNotFoundError,
-    SessionNotReadyError,
     ValidationError,
 )
 
@@ -26,18 +23,6 @@ class TestExceptions:
         assert str(error) == "Test error"
         assert isinstance(error, Exception)
 
-    def test_session_not_found_error(self):
-        """Test SessionNotFoundError"""
-        error = SessionNotFoundError("Session 123 not found")
-        assert str(error) == "Session 123 not found"
-        assert isinstance(error, JoernMCPError)
-
-    def test_session_not_ready_error(self):
-        """Test SessionNotReadyError"""
-        error = SessionNotReadyError("Session not ready")
-        assert str(error) == "Session not ready"
-        assert isinstance(error, JoernMCPError)
-
     def test_cpg_generation_error(self):
         """Test CPGGenerationError"""
         error = CPGGenerationError("CPG generation failed")
@@ -48,12 +33,6 @@ class TestExceptions:
         """Test QueryExecutionError"""
         error = QueryExecutionError("Query execution failed")
         assert str(error) == "Query execution failed"
-        assert isinstance(error, JoernMCPError)
-
-    def test_docker_error(self):
-        """Test DockerError"""
-        error = DockerError("Docker operation failed")
-        assert str(error) == "Docker operation failed"
         assert isinstance(error, JoernMCPError)
 
     def test_resource_limit_error(self):
@@ -77,11 +56,8 @@ class TestExceptions:
     def test_exception_hierarchy(self):
         """Test that all exceptions inherit from JoernMCPError"""
         exceptions = [
-            SessionNotFoundError("test"),
-            SessionNotReadyError("test"),
             CPGGenerationError("test"),
             QueryExecutionError("test"),
-            DockerError("test"),
             ResourceLimitError("test"),
             ValidationError("test"),
             GitOperationError("test"),
@@ -94,11 +70,8 @@ class TestExceptions:
     def test_exception_with_custom_message(self):
         """Test exceptions with custom messages"""
         test_cases = [
-            (SessionNotFoundError, "Session abc-123 not found"),
-            (SessionNotReadyError, "Session is still generating"),
             (CPGGenerationError, "Failed to generate CPG for Java project"),
             (QueryExecutionError, "Invalid CPGQL syntax"),
-            (DockerError, "Cannot connect to Docker daemon"),
             (ResourceLimitError, "Maximum concurrent sessions reached"),
             (ValidationError, "Unsupported language: rust"),
             (GitOperationError, "Repository not found"),

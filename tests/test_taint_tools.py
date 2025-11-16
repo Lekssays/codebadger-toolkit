@@ -1,10 +1,11 @@
 import asyncio
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
+import uuid
 
 import pytest
 
-from src.models import Config, CPGConfig, QueryResult, Session, SessionStatus
+from src.models import Config, CPGConfig, QueryResult, CodebaseInfo
 from src.tools.mcp_tools import register_tools
 
 
@@ -23,41 +24,39 @@ class FakeMCP:
 
 @pytest.fixture
 def fake_services():
-    # session manager mock
-    session_manager = AsyncMock()
-    import uuid
-
-    # create a ready session with valid UUID
-    ready_id = str(uuid.uuid4())
-    ready_session = Session(
-        id=ready_id,
-        container_id="c1",
+    # codebase tracker mock
+    from src.services.codebase_tracker import CodebaseTracker
+    codebase_tracker = MagicMock()
+    codebase_hash = str(uuid.uuid4()).replace('-', '')[:16]
+    codebase_info = CodebaseInfo(
+        codebase_hash=codebase_hash,
         source_type="local",
         source_path="/tmp",
         language="c",
-        status="ready",
+        cpg_path="/tmp/test.cpg",
+        created_at=datetime.now(timezone.utc),
+        last_accessed=datetime.now(timezone.utc),
     )
-    session_manager.get_session = AsyncMock(return_value=ready_session)
-    session_manager.touch_session = AsyncMock(return_value=None)
+    codebase_tracker.get_codebase.return_value = codebase_info
 
     # query executor mock
-    query_executor = AsyncMock()
-    
+    query_executor = MagicMock()
+
     # Store the last query for test assertions
     query_executor.last_query = None
-    
-    async def execute_query_with_tracking(*args, **kwargs):
+
+    def execute_query_with_tracking(*args, **kwargs):
         # Store the query parameter
         if 'query' in kwargs:
-            query_executor.last_query = kwargs['query']
+            query_executor.last_query = kwargs['query'] 
         elif len(args) > 2:
             query_executor.last_query = args[2]  # query is typically 3rd arg
-        
+
         # Return the mock result
         return QueryResult(
             success=True,
             data=[
-                {
+                { 
                     "_1": 123,
                     "_2": "getenv",
                     "_3": 'char *s = getenv("FOO")',
@@ -68,27 +67,26 @@ def fake_services():
             ],
             row_count=1,
         )
-    
+
     query_executor.execute_query = execute_query_with_tracking
 
     # config with taint lists
-    cpg = CPGConfig()
+    cpg = CPGConfig() 
     cpg.taint_sources = {"c": ["getenv", "fgets"]}
     cpg.taint_sinks = {"c": ["system", "popen"]}
     cfg = Config(cpg=cpg)
 
     services = {
-        "session_manager": session_manager,
+        "codebase_tracker": codebase_tracker,
         "query_executor": query_executor,
         "config": cfg,
-        "session_id": ready_id,
+        "codebase_hash": codebase_hash,
     }
 
     return services
 
 
-@pytest.mark.asyncio
-async def test_find_taint_sources_success(fake_services):
+def test_find_taint_sources_success(fake_services):
     mcp = FakeMCP()
     register_tools(mcp, fake_services)
 
@@ -96,7 +94,7 @@ async def test_find_taint_sources_success(fake_services):
     assert func is not None
 
     # call the registered tool function
-    res = await func(session_id=fake_services["session_id"], language="c", limit=10)
+    res = func(codebase_hash=fake_services["codebase_hash"], language="c", limit=10)
 
     assert res.get("success") is True
     assert "sources" in res
@@ -104,8 +102,7 @@ async def test_find_taint_sources_success(fake_services):
     assert res["total"] == 1
 
 
-@pytest.mark.asyncio
-async def test_find_taint_sources_with_filename_filter(fake_services):
+def test_find_taint_sources_with_filename_filter(fake_services):
     """Test find_taint_sources with filename parameter"""
     mcp = FakeMCP()
     register_tools(mcp, fake_services)
@@ -114,11 +111,11 @@ async def test_find_taint_sources_with_filename_filter(fake_services):
     assert func is not None
 
     # Call with filename filter
-    res = await func(
-        session_id=fake_services["session_id"],
+    res = func(
+        codebase_hash=fake_services["codebase_hash"],
         language="c",
         filename="shell.c",
-        limit=10
+        limit=10,
     )
 
     assert res.get("success") is True
@@ -131,15 +128,14 @@ async def test_find_taint_sources_with_filename_filter(fake_services):
     assert "shell" in query_executor.last_query
 
 
-@pytest.mark.asyncio
-async def test_find_taint_sinks_success(fake_services):
+def test_find_taint_sinks_success(fake_services):
     mcp = FakeMCP()
     register_tools(mcp, fake_services)
 
     func = mcp.registered.get("find_taint_sinks")
     assert func is not None
 
-    res = await func(session_id=fake_services["session_id"], language="c", limit=10)
+    res = func(codebase_hash=fake_services["codebase_hash"], language="c", limit=10)
 
     assert res.get("success") is True
     assert "sinks" in res
@@ -147,8 +143,7 @@ async def test_find_taint_sinks_success(fake_services):
     assert res["total"] == 1
 
 
-@pytest.mark.asyncio
-async def test_find_taint_sinks_with_filename_filter(fake_services):
+def test_find_taint_sinks_with_filename_filter(fake_services):
     """Test find_taint_sinks with filename parameter"""
     mcp = FakeMCP()
     register_tools(mcp, fake_services)
@@ -157,11 +152,11 @@ async def test_find_taint_sinks_with_filename_filter(fake_services):
     assert func is not None
 
     # Call with filename filter
-    res = await func(
-        session_id=fake_services["session_id"],
+    res = func(
+        codebase_hash=fake_services["codebase_hash"],
         language="c",
         filename="main.c",
-        limit=10
+        limit=10,
     )
 
     assert res.get("success") is True
@@ -174,8 +169,7 @@ async def test_find_taint_sinks_with_filename_filter(fake_services):
     assert "main" in query_executor.last_query
 
 
-@pytest.mark.asyncio
-async def test_find_taint_flows_success(fake_services):
+def test_find_taint_flows_success(fake_services):
     # Setup mock for source, sink, and flow queries
     services = fake_services
 
@@ -214,26 +208,25 @@ async def test_find_taint_flows_success(fake_services):
 
     call_count = [0]
 
-    async def mock_execute(*args, **kwargs):
+    def mock_execute(*args, **kwargs):
         call_count[0] += 1
         if call_count[0] == 1:
-            return source_result
+            return source_result 
         elif call_count[0] == 2:
             return sink_result
         else:
             return flow_result
 
-    services["query_executor"].execute_query = AsyncMock(side_effect=mock_execute)
-    services["session_manager"].get_session = AsyncMock(
-        return_value=Session(
-            id=services["session_id"],
-            language="c",
-            status=SessionStatus.READY.value,
-            source_path="/path",
-            source_type="local",
-            created_at=datetime.now(timezone.utc),
-            last_accessed=datetime.now(timezone.utc),
-        )
+    services["query_executor"].execute_query = MagicMock(side_effect=mock_execute)
+    # Set codebase tracker to return a codebase info ready for queries
+    services["codebase_tracker"].get_codebase.return_value = CodebaseInfo(
+        codebase_hash=services["codebase_hash"],
+        source_type="local",
+        source_path="/path",
+        language="c",
+        cpg_path="/tmp/test.cpg",
+        created_at=datetime.now(timezone.utc),
+        last_accessed=datetime.now(timezone.utc),
     )
 
     mcp = FakeMCP()
@@ -242,15 +235,14 @@ async def test_find_taint_flows_success(fake_services):
     func = mcp.registered.get("find_taint_flows")
     assert func is not None
 
-    res = await func(
-        session_id=services["session_id"],
+    res = func(
+        codebase_hash=services["codebase_hash"],
         source_node_id="1001",
         sink_node_id="1002",
         timeout=10,
     )
 
-@pytest.mark.asyncio
-async def test_find_taint_flows_source_only(fake_services):
+def test_find_taint_flows_source_only(fake_services):
     # Setup mock for source-only query (flows to any sink)
     services = fake_services
 
@@ -281,24 +273,22 @@ async def test_find_taint_flows_source_only(fake_services):
 
     call_count = [0]
 
-    async def mock_execute(*args, **kwargs):
+    def mock_execute(*args, **kwargs):
         call_count[0] += 1
         if call_count[0] == 1:
-            return source_result
+            return source_result 
         else:
             return flow_result
 
-    services["query_executor"].execute_query = AsyncMock(side_effect=mock_execute)
-    services["session_manager"].get_session = AsyncMock(
-        return_value=Session(
-            id=services["session_id"],
-            language="c",
-            status=SessionStatus.READY.value,
-            source_path="/path",
-            source_type="local",
-            created_at=datetime.now(timezone.utc),
-            last_accessed=datetime.now(timezone.utc),
-        )
+    services["query_executor"].execute_query = MagicMock(side_effect=mock_execute)
+    services["codebase_tracker"].get_codebase.return_value = CodebaseInfo(
+        codebase_hash=services["codebase_hash"],
+        source_type="local",
+        source_path="/path",
+        language="c",
+        cpg_path="/tmp/test.cpg",
+        created_at=datetime.now(timezone.utc),
+        last_accessed=datetime.now(timezone.utc),
     )
 
     mcp = FakeMCP()
@@ -307,8 +297,8 @@ async def test_find_taint_flows_source_only(fake_services):
     func = mcp.registered.get("find_taint_flows")
     assert func is not None
 
-    res = await func(
-        session_id=services["session_id"],
+    res = func(
+        codebase_hash=services["codebase_hash"],
         source_node_id="1001",
         timeout=10,
     )
@@ -320,8 +310,7 @@ async def test_find_taint_flows_source_only(fake_services):
     assert res["total_flows"] == 1
 
 
-@pytest.mark.asyncio
-async def test_find_taint_flows_sink_only_error(fake_services):
+def test_find_taint_flows_sink_only_error(fake_services):
     # Test that sink-only queries are rejected
     services = fake_services
 
@@ -331,8 +320,8 @@ async def test_find_taint_flows_sink_only_error(fake_services):
     func = mcp.registered.get("find_taint_flows")
     assert func is not None
 
-    res = await func(
-        session_id=services["session_id"],
+    res = func(
+        codebase_hash=services["codebase_hash"],
         sink_node_id="1002",
         timeout=10,
     )

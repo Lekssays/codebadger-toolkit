@@ -4,7 +4,6 @@ Core MCP Tools for CodeBadger Toolkit Server - Simplified hash-based version
 Provides core CPG management functionality
 """
 
-import asyncio
 import hashlib
 import io
 import logging
@@ -14,6 +13,7 @@ import tarfile
 from typing import Any, Dict, Optional
 
 from ..exceptions import ValidationError
+from ..models import CodebaseInfo
 from ..utils.validators import (
     validate_github_url,
     validate_language,
@@ -49,11 +49,18 @@ def get_cpg_cache_key(source_type: str, source_path: str, language: str) -> str:
     return hash_digest
 
 
+def get_cpg_cache_path(cache_key: str, playground_path: str) -> str:
+    """
+    Generate the CPG cache file path for a given cache key and playground path.
+    """
+    return os.path.join(playground_path, "cpgs", cache_key, "cpg.bin")
+
+
 def register_core_tools(mcp, services: dict):
     """Register core MCP tools with the FastMCP server"""
 
     @mcp.tool()
-    async def generate_cpg(
+    def generate_cpg(
         source_type: str,
         source_path: str,
         language: str,
@@ -127,13 +134,32 @@ def register_core_tools(mcp, services: dict):
                 logger.info(f"Found existing CPG: {cpg_path}")
                 
                 # Update codebase tracker
-                await codebase_tracker.save_codebase(
+                codebase_tracker.save_codebase(
                     codebase_hash=cpg_cache_key,
                     source_type=source_type,
                     source_path=source_path,
                     language=language,
                     cpg_path=cpg_path,
                 )
+
+                # Ensure a Joern server is running and the CPG is loaded
+                try:
+                    # Log available services for debugging
+                    logger.debug(f"Available services at cached path: {list(services.keys())}")
+                    joern_server_manager = services.get("joern_server_manager")
+                    logger.debug(f"joern_server_manager object: {joern_server_manager}")
+                    if joern_server_manager:
+                        logger.info("Attempting to ensure Joern server for cached CPG")
+                        # If a server isn't running, spawn and load the CPG
+                        port = joern_server_manager.get_server_port(cpg_cache_key)
+                        if not port or not joern_server_manager.is_server_running(cpg_cache_key):
+                            logger.info(f"Spawning Joern server for cached CPG {cpg_cache_key}")
+                            port = joern_server_manager.spawn_server(cpg_cache_key)
+                            if port:
+                                joern_server_manager.load_cpg(cpg_cache_key, cpg_path)
+                                codebase_tracker.update_codebase(codebase_hash=cpg_cache_key, joern_port=port)
+                except Exception as e:
+                    logger.warning(f"Failed to ensure Joern server for cached CPG {cpg_cache_key}: {e}")
 
                 return {
                     "codebase_hash": cpg_cache_key,
@@ -151,7 +177,7 @@ def register_core_tools(mcp, services: dict):
                 # Clone to playground/codebases/<hash>
                 if not os.path.exists(codebase_dir):
                     os.makedirs(codebase_dir, exist_ok=True)
-                    await git_manager.clone_repository(
+                    git_manager.clone_repository(
                         repo_url=source_path,
                         target_path=codebase_dir,
                         branch=branch,
@@ -197,7 +223,7 @@ def register_core_tools(mcp, services: dict):
             cpg_path_for_gen = cpg_path  # Already the correct path
 
             # Track in codebase tracker
-            await codebase_tracker.save_codebase(
+            codebase_tracker.save_codebase(
                 codebase_hash=cpg_cache_key,
                 source_type=source_type,
                 source_path=source_path,
@@ -205,38 +231,41 @@ def register_core_tools(mcp, services: dict):
                 cpg_path=None,  # Will be updated after generation
             )
 
-            # Generate CPG asynchronously
-            async def generate_cpg_async():
-                try:
-                    # Generate CPG (already inside container, no copying needed)
-                    logger.info(f"Generating CPG for {cpg_cache_key}")
-                    await cpg_generator.generate_cpg(
-                        source_path=source_path_for_cpg,
-                        language=language,
-                        cpg_path=cpg_path_for_gen,
-                    )
-                    
-                    logger.info(f"CPG generated successfully: {cpg_path}")
-                    
-                    # Update codebase tracker with CPG path
-                    await codebase_tracker.update_codebase(
-                        codebase_hash=cpg_cache_key,
-                        cpg_path=cpg_path,
-                    )
-                    
-                except Exception as e:
-                    logger.error(f"Failed to generate CPG for {cpg_cache_key}: {e}")
-                    raise
-
-            # Start async generation
-            asyncio.create_task(generate_cpg_async())
-
-            return {
-                "codebase_hash": cpg_cache_key,
-                "status": "generating",
-                "message": "CPG generation started",
-                "estimated_time": "2-5 minutes",
-            }
+            # Generate CPG synchronously
+            try:
+                # Generate CPG (already inside container, no copying needed)
+                logger.info(f"Generating CPG for {cpg_cache_key}")
+                cpg_path, joern_port = cpg_generator.generate_cpg(
+                    source_path=source_path_for_cpg,
+                    language=language,
+                    cpg_path=cpg_path_for_gen,
+                    codebase_hash=cpg_cache_key,
+                )
+                
+                logger.info(f"CPG generated successfully: {cpg_path}")
+                
+                # Update codebase tracker with CPG path and Joern port
+                codebase_tracker.update_codebase(
+                    codebase_hash=cpg_cache_key,
+                    cpg_path=cpg_path,
+                    joern_port=joern_port,
+                )
+                
+                return {
+                    "codebase_hash": cpg_cache_key,
+                    "status": "ready",
+                    "message": "CPG generated successfully",
+                    "cpg_path": cpg_path,
+                    "joern_port": joern_port,
+                }
+                
+            except Exception as e:
+                logger.error(f"Failed to generate CPG for {cpg_cache_key}: {e}")
+                return {
+                    "codebase_hash": cpg_cache_key,
+                    "status": "failed",
+                    "message": f"CPG generation failed: {str(e)}",
+                }
 
         except ValidationError as e:
             logger.error(f"Validation error: {e}")
@@ -252,7 +281,7 @@ def register_core_tools(mcp, services: dict):
             }
 
     @mcp.tool()
-    async def get_cpg_status(codebase_hash: str) -> Dict[str, Any]:
+    def get_cpg_status(codebase_hash: str) -> Dict[str, Any]:
         """
         Get the status of a CPG generation or check if CPG exists.
 
@@ -272,7 +301,7 @@ def register_core_tools(mcp, services: dict):
             codebase_tracker = services["codebase_tracker"]
             
             # Get codebase info
-            codebase_info = await codebase_tracker.get_codebase(codebase_hash)
+            codebase_info = codebase_tracker.get_codebase(codebase_hash)
             
             if not codebase_info:
                 # Check if CPG file exists on disk
@@ -282,12 +311,39 @@ def register_core_tools(mcp, services: dict):
                 cpg_path = os.path.join(playground_path, "cpgs", codebase_hash, "cpg.bin")
                 
                 if os.path.exists(cpg_path):
-                    return {
-                        "codebase_hash": codebase_hash,
-                        "exists": True,
-                        "cpg_path": cpg_path,
-                        "status": "ready",
-                    }
+                    # Create minimal codebase info for existing CPG
+                    # We don't have source metadata, so use defaults
+                    codebase_info = CodebaseInfo(
+                        codebase_hash=codebase_hash,
+                        source_type="unknown",
+                        source_path="unknown",
+                        language="unknown",
+                        cpg_path=cpg_path,
+                        joern_port=None,
+                        metadata={},
+                    )
+                    # Save this minimal info to Redis for future use
+                    codebase_tracker.save_codebase(
+                        codebase_hash=codebase_hash,
+                        source_type="unknown",
+                        source_path="unknown", 
+                        language="unknown",
+                        cpg_path=cpg_path,
+                    )
+
+                    # Attempt to ensure a Joern server is running for this existing CPG
+                    try:
+                        joern_server_manager = services.get("joern_server_manager")
+                        if joern_server_manager:
+                            port = joern_server_manager.get_server_port(codebase_hash)
+                            if not port or not joern_server_manager.is_server_running(codebase_hash):
+                                logger.info(f"Spawning Joern server for existing CPG {codebase_hash}")
+                                port = joern_server_manager.spawn_server(codebase_hash)
+                                if port:
+                                    joern_server_manager.load_cpg(codebase_hash, cpg_path)
+                                    codebase_tracker.update_codebase(codebase_hash=codebase_hash, joern_port=port)
+                    except Exception as e:
+                        logger.warning(f"Failed to ensure Joern server for existing CPG {codebase_hash}: {e}")
                 else:
                     return {
                         "codebase_hash": codebase_hash,

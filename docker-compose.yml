@@ -4,7 +4,7 @@ services:
   codebadger-toolkit:
     build:
       context: .
-      dockerfile: Dockerfile.joern
+      dockerfile: Dockerfile
     image: codebadger-toolkit:latest
     container_name: codebadger-toolkit-server
     ports:

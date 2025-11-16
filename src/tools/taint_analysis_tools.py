@@ -19,7 +19,7 @@ def register_taint_analysis_tools(mcp, services: dict):
     """Register taint analysis MCP tools with the FastMCP server"""
 
     @mcp.tool()
-    async def find_taint_sources(
+    def find_taint_sources(
         codebase_hash: str,
         language: Optional[str] = None,
         source_patterns: Optional[list] = None,
@@ -66,7 +66,7 @@ def register_taint_analysis_tools(mcp, services: dict):
             query_executor = services["query_executor"]
 
             # Verify CPG exists for this codebase
-            codebase_info = await codebase_tracker.get_codebase(codebase_hash)
+            codebase_info = codebase_tracker.get_codebase(codebase_hash)
             if not codebase_info or not codebase_info.cpg_path:
                 raise ValidationError(f"CPG not found for codebase {codebase_hash}. Generate it first using generate_cpg.")
 
@@ -99,7 +99,7 @@ def register_taint_analysis_tools(mcp, services: dict):
             else:
                 query = f'cpg.call.name("{joined}").map(c => (c.id, c.name, c.code, c.file.name.headOption.getOrElse("unknown"), c.lineNumber.getOrElse(-1), c.method.fullName)).take({limit})'
 
-            result = await query_executor.execute_query(
+            result = query_executor.execute_query(
                 codebase_hash=codebase_hash,
                 cpg_path=codebase_info.cpg_path,
                 query=query,
@@ -143,7 +143,7 @@ def register_taint_analysis_tools(mcp, services: dict):
             }
 
     @mcp.tool()
-    async def find_taint_sinks(
+    def find_taint_sinks(
         codebase_hash: str,
         language: Optional[str] = None,
         sink_patterns: Optional[list] = None,
@@ -190,7 +190,7 @@ def register_taint_analysis_tools(mcp, services: dict):
             query_executor = services["query_executor"]
 
             # Verify CPG exists for this codebase
-            codebase_info = await codebase_tracker.get_codebase(codebase_hash)
+            codebase_info = codebase_tracker.get_codebase(codebase_hash)
             if not codebase_info or not codebase_info.cpg_path:
                 raise ValidationError(f"CPG not found for codebase {codebase_hash}. Generate it first using generate_cpg.")
 
@@ -221,7 +221,7 @@ def register_taint_analysis_tools(mcp, services: dict):
             else:
                 query = f'cpg.call.name("{joined}").map(c => (c.id, c.name, c.code, c.file.name.headOption.getOrElse("unknown"), c.lineNumber.getOrElse(-1), c.method.fullName)).take({limit})'
 
-            result = await query_executor.execute_query(
+            result = query_executor.execute_query(
                 codebase_hash=codebase_hash,
                 cpg_path=codebase_info.cpg_path,
                 query=query,
@@ -265,7 +265,7 @@ def register_taint_analysis_tools(mcp, services: dict):
             }
 
     @mcp.tool()
-    async def find_taint_flows(
+    def find_taint_flows(
         codebase_hash: str,
         source_node_id: Optional[str] = None,
         sink_node_id: Optional[str] = None,
@@ -437,7 +437,7 @@ def register_taint_analysis_tools(mcp, services: dict):
             query_executor = services["query_executor"]
 
             # Verify CPG exists for this codebase
-            codebase_info = await codebase_tracker.get_codebase(codebase_hash)
+            codebase_info = codebase_tracker.get_codebase(codebase_hash)
             if not codebase_info or not codebase_info.cpg_path:
                 raise ValidationError(f"CPG not found for codebase {codebase_hash}. Generate it first using generate_cpg.")
 
@@ -447,7 +447,7 @@ def register_taint_analysis_tools(mcp, services: dict):
             has_sink = bool(sink_node_id or sink_location)
 
             # Helper function to resolve node by ID or location
-            async def resolve_node(node_id, location, node_type):
+            def resolve_node(node_id, location, node_type):
                 if node_id:
                     try:
                         node_id_long = int(node_id)
@@ -479,7 +479,7 @@ def register_taint_analysis_tools(mcp, services: dict):
                         query = f'cpg.call.where(_.file.name(".*{filename}$")).lineNumber({
                             line_num}).map(c => (c.id, c.code, c.file.name.headOption.getOrElse("unknown"), c.lineNumber.getOrElse(-1), c.method.fullName)).take(1).l'
 
-                result = await query_executor.execute_query(
+                result = query_executor.execute_query(
                     codebase_hash=codebase_hash,
                     cpg_path=codebase_info.cpg_path,
                     query=query,
@@ -499,9 +499,9 @@ def register_taint_analysis_tools(mcp, services: dict):
                         }
                 return None
 
-            source_info = await resolve_node(source_node_id, source_location, "source")
+            source_info = resolve_node(source_node_id, source_location, "source")
             if has_sink:
-                sink_info = await resolve_node(sink_node_id, sink_location, "sink")
+                sink_info = resolve_node(sink_node_id, sink_location, "sink")
 
             # If source not found, return early
             if not source_info:
@@ -529,88 +529,12 @@ def register_taint_analysis_tools(mcp, services: dict):
             if has_sink:
                 # Specific sink mode: find flows between source and sink
                 sink_id = sink_info["node_id"]
-                query = f"""
-                {{
-                  val source = cpg.call.id({source_id}L).l.headOption
-                  val sink = cpg.call.id({sink_id}L).l.headOption
-
-                  val flows = if (source.nonEmpty && sink.nonEmpty) {{
-                    // Simple dataflow: source -> identifier -> sink
-                    val sourceCall = source.get
-                    val sinkCall = sink.get
-
-                    val assignments = sourceCall.inAssignment.l
-                    if (assignments.nonEmpty) {{
-                      val assign = assignments.head
-                      val targetVar = assign.target.code
-
-                      val sinkArgs = sinkCall.argument.code.l
-                      val matches = sinkArgs.contains(targetVar)
-
-                      if (matches) {{
-                        List(Map(
-                          "_1" -> 0,  // flow_idx
-                          "_2" -> 3,  // path_length
-                          "_3" -> List(  // nodes
-                            Map("_1" -> sourceCall.code, "_2" -> sourceCall.file.name.headOption.getOrElse("unknown"), "_3" -> sourceCall.lineNumber.getOrElse(-1), "_4" -> "CALL"),
-                            Map("_1" -> targetVar, "_2" -> assign.file.name.headOption.getOrElse("unknown"), "_3" -> assign.lineNumber.getOrElse(-1), "_4" -> "IDENTIFIER"),
-                            Map("_1" -> sinkCall.code, "_2" -> sinkCall.file.name.headOption.getOrElse("unknown"), "_3" -> sinkCall.lineNumber.getOrElse(-1), "_4" -> "CALL")
-                          )
-                        ))
-                      }} else {{
-                        List()
-                      }}
-                    }} else {{
-                      List()
-                    }}
-                  }} else {{
-                    List()
-                  }}
-
-                  flows
-                }}.toJsonPretty"""
+                query = f'{{ val source = cpg.call.id({source_id}L).l.headOption; val sink = cpg.call.id({sink_id}L).l.headOption; val flows = if (source.nonEmpty && sink.nonEmpty) {{ val sourceCall = source.get; val sinkCall = sink.get; val assignments = sourceCall.inAssignment.l; if (assignments.nonEmpty) {{ val assign = assignments.head; val targetVar = assign.target.code; val sinkArgs = sinkCall.argument.code.l; val matches = sinkArgs.contains(targetVar); if (matches) {{ List(Map("_1" -> 0, "_2" -> 3, "_3" -> List(Map("_1" -> sourceCall.code, "_2" -> sourceCall.file.name.headOption.getOrElse("unknown"), "_3" -> sourceCall.lineNumber.getOrElse(-1), "_4" -> "CALL"), Map("_1" -> targetVar, "_2" -> assign.file.name.headOption.getOrElse("unknown"), "_3" -> assign.lineNumber.getOrElse(-1), "_4" -> "IDENTIFIER"), Map("_1" -> sinkCall.code, "_2" -> sinkCall.file.name.headOption.getOrElse("unknown"), "_3" -> sinkCall.lineNumber.getOrElse(-1), "_4" -> "CALL")))) }} else {{ List() }} }} else {{ List() }} }} else {{ List() }}; flows }}.toJsonPretty'
             else:
                 # Source-only mode: find flows from source to any dangerous sink
-                query = f"""
-                {{
-                  val source = cpg.call.id({source_id}L).l.headOption
+                query = f'{{ val source = cpg.call.id({source_id}L).l.headOption; val flows = if (source.nonEmpty) {{ val sourceCall = source.get; val assignments = sourceCall.inAssignment.l; if (assignments.nonEmpty) {{ val assign = assignments.head; val targetVar = assign.target.code; val dangerousSinks = Set("system", "popen", "execl", "execv", "sprintf", "fprintf", "free", "delete"); val sinkPattern = dangerousSinks.mkString("|"); val sinkCalls = cpg.call.name(sinkPattern).filter(sink => {{ val sinkArgs = sink.argument.code.l; sinkArgs.contains(targetVar) }}).l.take(20); sinkCalls.map(sink => Map("_1" -> 0, "_2" -> 3, "_3" -> List(Map("_1" -> sourceCall.code, "_2" -> sourceCall.file.name.headOption.getOrElse("unknown"), "_3" -> sourceCall.lineNumber.getOrElse(-1), "_4" -> "CALL"), Map("_1" -> targetVar, "_2" -> assign.file.name.headOption.getOrElse("unknown"), "_3" -> assign.lineNumber.getOrElse(-1), "_4" -> "IDENTIFIER"), Map("_1" -> sink.code, "_2" -> sink.file.name.headOption.getOrElse("unknown"), "_3" -> sink.lineNumber.getOrElse(-1), "_4" -> "CALL")))) }} else {{ List() }} }} else {{ List() }}; flows }}.toJsonPretty'
 
-                  val flows = if (source.nonEmpty) {{
-                    val sourceCall = source.get
-                    val assignments = sourceCall.inAssignment.l
-                    
-                    if (assignments.nonEmpty) {{
-                      val assign = assignments.head
-                      val targetVar = assign.target.code
-                      
-                      // Find all dangerous sinks that use this variable
-                      val dangerousSinks = Set("system", "popen", "execl", "execv", "sprintf", "fprintf", "free", "delete")
-                      val sinkPattern = dangerousSinks.mkString("|")
-                      val sinkCalls = cpg.call.name(sinkPattern).filter(sink => {{
-                        val sinkArgs = sink.argument.code.l
-                        sinkArgs.contains(targetVar)
-                      }}).l.take(20)  // Limit results
-                      
-                      sinkCalls.map(sink => Map(
-                        "_1" -> 0,  // flow_idx
-                        "_2" -> 3,  // path_length
-                        "_3" -> List(  // nodes
-                          Map("_1" -> sourceCall.code, "_2" -> sourceCall.file.name.headOption.getOrElse("unknown"), "_3" -> sourceCall.lineNumber.getOrElse(-1), "_4" -> "CALL"),
-                          Map("_1" -> targetVar, "_2" -> assign.file.name.headOption.getOrElse("unknown"), "_3" -> assign.lineNumber.getOrElse(-1), "_4" -> "IDENTIFIER"),
-                          Map("_1" -> sink.code, "_2" -> sink.file.name.headOption.getOrElse("unknown"), "_3" -> sink.lineNumber.getOrElse(-1), "_4" -> "CALL")
-                        )
-                      ))
-                    }} else {{
-                      List()
-                    }}
-                  }} else {{
-                    List()
-                  }}
-
-                  flows
-                }}.toJsonPretty"""
-
-            result = await query_executor.execute_query(
+            result = query_executor.execute_query(
                 codebase_hash=codebase_hash,
                 cpg_path=codebase_info.cpg_path,
                 query=query,
@@ -684,7 +608,7 @@ def register_taint_analysis_tools(mcp, services: dict):
             }
 
     @mcp.tool()
-    async def check_method_reachability(
+    def check_method_reachability(
         codebase_hash: str, source_method: str, target_method: str
     ) -> Dict[str, Any]:
         """
@@ -715,7 +639,7 @@ def register_taint_analysis_tools(mcp, services: dict):
             query_executor = services["query_executor"]
 
             # Verify CPG exists for this codebase
-            codebase_info = await codebase_tracker.get_codebase(codebase_hash)
+            codebase_info = codebase_tracker.get_codebase(codebase_hash)
             if not codebase_info or not codebase_info.cpg_path:
                 raise ValidationError(f"CPG not found for codebase {codebase_hash}. Generate it first using generate_cpg.")
 
@@ -731,7 +655,6 @@ def register_taint_analysis_tools(mcp, services: dict):
                 f'val target = cpg.method.name("{target_escaped}").l\n'
                 f"val reachable = if (source.nonEmpty && target.nonEmpty) {{\n"
                 f"  val targetName = target.head.name\n"
-                f"  // BFS traversal of call graph using recursive method traversal\n"
                 f"  var visited = Set[String]()\n"
                 f"  var toVisit = scala.collection.mutable.Queue[io.shiftleft.codepropertygraph.generated.nodes.Method]()\n"
                 f"  toVisit.enqueue(source.head)\n"
@@ -758,7 +681,7 @@ def register_taint_analysis_tools(mcp, services: dict):
                 f"List(reachable).toJsonPretty"
             )
 
-            result = await query_executor.execute_query(
+            result = query_executor.execute_query(
                 codebase_hash=codebase_hash,
                 cpg_path=codebase_info.cpg_path,
                 query=query,
@@ -805,7 +728,7 @@ def register_taint_analysis_tools(mcp, services: dict):
             }
 
     @mcp.tool()
-    async def get_program_slice(
+    def get_program_slice(
         codebase_hash: str,
         node_id: Optional[str] = None,
         location: Optional[str] = None,
@@ -884,7 +807,7 @@ def register_taint_analysis_tools(mcp, services: dict):
             query_executor = services["query_executor"]
 
             # Verify CPG exists for this codebase
-            codebase_info = await codebase_tracker.get_codebase(codebase_hash)
+            codebase_info = codebase_tracker.get_codebase(codebase_hash)
             if not codebase_info or not codebase_info.cpg_path:
                 raise ValidationError(f"CPG not found for codebase {codebase_hash}. Generate it first using generate_cpg.")
 
@@ -906,137 +829,121 @@ def register_taint_analysis_tools(mcp, services: dict):
                     raise ValidationError(f"Invalid line number in location: {parts[1]}")
                 call_name = parts[2] if len(parts) > 2 else ""
 
-            # Build inline Scala query that creates JSON directly
-            query_template = r"""{
-def escapeJson(s: String): String = {
-  s.replace("\\", "\\\\")
-   .replace("\"", "\\\"")
-   .replace("\n", "\\n")
-   .replace("\r", "\\r")
-   .replace("\t", "\\t")
-}
-
-val useNodeId = USE_NODE_ID_PLACEHOLDER
-val targetNodeId = "NODE_ID_PLACEHOLDER"
-val targetFilename = "FILENAME_PLACEHOLDER"
-val targetLine = LINE_NUM_PLACEHOLDER
-val targetCallName = "CALL_NAME_PLACEHOLDER"
-val includeDataflow = INCLUDE_DATAFLOW_PLACEHOLDER
-val includeControlFlow = INCLUDE_CONTROL_FLOW_PLACEHOLDER
-
-// Step 1: Find the target call
-val targetCallOpt = if (useNodeId) {
-  cpg.call.id(targetNodeId.toLong).headOption
-} else {
-  val candidateCalls = cpg.file.name(".*" + targetFilename + ".*")
-    .ast.isCall
-    .lineNumber(targetLine)
-    .l
+            # Build multi-line Scala query (complex queries need proper block structure)
+            query = f'''
+{{
+  def escapeJson(s: String): String = {{
+    s.replace("\\\\", "\\\\\\\\").replace("\\"", "\\\\\\"").replace("\\n", "\\\\n").replace("\\r", "\\\\r").replace("\\t", "\\\\t")
+  }}
   
-  if (targetCallName.nonEmpty) {
-    candidateCalls.name(targetCallName).headOption
-  } else {
-    candidateCalls.headOption
-  }
-}
-
-val resultJson = targetCallOpt match {
-  case Some(call) =>
-    val callNodeId = call.id.toString
-    val callName = call.name
-    val callCode = escapeJson(call.code)
-    val callFilename = escapeJson(call.file.name.headOption.getOrElse("unknown"))
-    val callLineNumber = call.lineNumber.getOrElse(-1)
-    val callMethod = escapeJson(call.method.name)
-    val callArguments = call.argument.code.l
-    
-    val argsJson = callArguments.map(arg => "\"" + escapeJson(arg) + "\"").mkString(",")
-    val targetCallJson = "{\"node_id\":\"" + callNodeId + "\",\"name\":\"" + callName + "\",\"code\":\"" + callCode + "\",\"filename\":\"" + callFilename + "\",\"lineNumber\":" + callLineNumber + ",\"method\":\"" + callMethod + "\",\"arguments\":[" + argsJson + "]}"
-    
-    // Step 2: Collect dataflow dependencies
-    val dataflowList = scala.collection.mutable.ListBuffer[String]()
-    
-    if (includeDataflow) {
-      callArguments.foreach { arg =>
-        val cleanArg = arg.trim().replaceAll("\"", "")
-        
-        if (cleanArg.nonEmpty && 
-            !cleanArg.matches("\\d+") && 
-            !cleanArg.startsWith("(") && 
-            !cleanArg.startsWith("0x")) {
-          
-          val identifiers = cpg.identifier.name(cleanArg).l.take(10)
-          
-          identifiers.foreach { id =>
-            val idCode = escapeJson(id.code)
-            val idFilename = escapeJson(id.file.name.headOption.getOrElse("unknown"))
-            val idLineNumber = id.lineNumber.getOrElse(-1)
-            val idMethod = escapeJson(id.method.name)
-            
-            val dataflowJson = "{\"variable\":\"" + cleanArg + "\",\"code\":\"" + idCode + "\",\"filename\":\"" + idFilename + "\",\"lineNumber\":" + idLineNumber + ",\"method\":\"" + idMethod + "\"}"
-            dataflowList += dataflowJson
-          }
-        }
-      }
-    }
-    
-    val dataflowJson = dataflowList.take(20).mkString(",")
-    
-    // Step 3: Collect control dependencies
-    val controlDepsList = scala.collection.mutable.ListBuffer[String]()
-    
-    if (includeControlFlow) {
-      val controlDeps = call.controlledBy.dedup.take(20).l
+  val filename = "{filename}"
+  val lineNum = {line_num}
+  val useNodeId = {str(node_id is not None).lower()}
+  val nodeId = "{node_id if node_id else ""}"
+  val callName = "{call_name if call_name else ""}"
+  val includeDataflow = {str(include_dataflow).lower()}
+  val includeControlFlow = {str(include_control_flow).lower()}
+  
+  val targetMethodOpt = if (useNodeId) {{
+    cpg.call.id(nodeId.toLong).method.headOption
+  }} else {{
+    cpg.method.filter(m => {{
+      val f = m.file.name.headOption.getOrElse("")
+      (f.endsWith("/" + filename) || f == filename)
+    }}).filter(m => {{
+      val start = m.lineNumber.getOrElse(-1)
+      val end = m.lineNumberEnd.getOrElse(-1)
+      start <= lineNum && end >= lineNum
+    }}).headOption
+  }}
+  
+  targetMethodOpt match {{
+    case Some(method) => {{
+      val targetCallOpt = if (useNodeId) {{
+        cpg.call.id(nodeId.toLong).headOption
+      }} else {{
+        val calls = method.call.l.filter(c => c.lineNumber.getOrElse(-1) == lineNum)
+        if (callName != "" && calls.nonEmpty) calls.filter(_.name == callName).headOption else calls.headOption
+      }}
       
-      controlDeps.foreach { ctrl =>
-        val ctrlCode = escapeJson(ctrl.code)
-        val ctrlFilename = escapeJson(ctrl.file.name.headOption.getOrElse("unknown"))
-        val ctrlLineNumber = ctrl.lineNumber.getOrElse(-1)
-        val ctrlMethod = escapeJson(ctrl.method.name)
-        
-        val controlJson = "{\"code\":\"" + ctrlCode + "\",\"filename\":\"" + ctrlFilename + "\",\"lineNumber\":" + ctrlLineNumber + ",\"method\":\"" + ctrlMethod + "\"}"
-        controlDepsList += controlJson
-      }
-    }
-    
-    val controlDepsJson = controlDepsList.mkString(",")
-    
-    val totalNodes = 1 + dataflowList.size + controlDepsList.size
-    
-    "{\"success\":true,\"slice\":{\"target_call\":" + targetCallJson + ",\"dataflow\":[" + dataflowJson + "],\"control_dependencies\":[" + controlDepsJson + "]},\"total_nodes\":" + totalNodes + "}"
-    
-  case None =>
-    val errorMsg = if (useNodeId) {
-      s"Call not found: node_id=$targetNodeId, location=null"
-    } else {
-      val locStr = if (targetCallName.nonEmpty) {
-        s"$targetFilename:$targetLine:$targetCallName"
-      } else {
-        s"$targetFilename:$targetLine"
-      }
-      s"Call not found: node_id=null, location=$locStr"
-    }
-    "{\"success\":false,\"error\":{\"code\":\"NOT_FOUND\",\"message\":\"" + errorMsg + "\"}}"
-}
-
-resultJson
-}"""
-
-            # Replace placeholders
-            use_node_id = "true" if node_id else "false"
-            query = (
-                query_template
-                .replace("USE_NODE_ID_PLACEHOLDER", use_node_id)
-                .replace("NODE_ID_PLACEHOLDER", node_id if node_id else "")
-                .replace("FILENAME_PLACEHOLDER", filename if filename else "")
-                .replace("LINE_NUM_PLACEHOLDER", str(line_num) if line_num else "-1")
-                .replace("CALL_NAME_PLACEHOLDER", call_name if call_name else "")
-                .replace("INCLUDE_DATAFLOW_PLACEHOLDER", "true" if include_dataflow else "false")
-                .replace("INCLUDE_CONTROL_FLOW_PLACEHOLDER", "true" if include_control_flow else "false")
+      targetCallOpt match {{
+        case Some(targetCall) => {{
+          val dataflow = if (includeDataflow) {{
+            val argVars = targetCall.argument.code.l
+            val assignments = method.assignment.l.filter(assign => {{
+              val line = assign.lineNumber.getOrElse(-1)
+              line < lineNum
+            }}).filter(assign => {{
+              val targetCode = assign.target.code
+              argVars.exists(arg => arg.contains(targetCode) || targetCode.contains(arg))
+            }}).map(assign => Map(
+              "variable" -> assign.target.code,
+              "code" -> escapeJson(assign.code),
+              "filename" -> escapeJson(assign.file.name.headOption.getOrElse("unknown")),
+              "lineNumber" -> assign.lineNumber.getOrElse(-1),
+              "method" -> escapeJson(assign.method.fullName)
+            )).l
+            assignments
+          }} else List()
+          
+          val controlDeps = if (includeControlFlow) {{
+            val conditions = method.ast.isControlStructure.l.filter(ctrl => {{
+              val ctrlLine = ctrl.lineNumber.getOrElse(-1)
+              ctrlLine < lineNum && ctrlLine >= 0
+            }}).map(ctrl => Map(
+              "code" -> escapeJson(ctrl.code),
+              "filename" -> escapeJson(ctrl.file.name.headOption.getOrElse("unknown")),
+              "lineNumber" -> ctrl.lineNumber.getOrElse(-1),
+              "method" -> escapeJson(ctrl.method.fullName)
+            )).l
+            conditions
+          }} else List()
+          
+          val targetCallMap = Map(
+            "node_id" -> targetCall.id.toString,
+            "name" -> targetCall.name,
+            "code" -> escapeJson(targetCall.code),
+            "filename" -> escapeJson(targetCall.file.name.headOption.getOrElse("unknown")),
+            "lineNumber" -> targetCall.lineNumber.getOrElse(-1),
+            "method" -> escapeJson(targetCall.method.fullName),
+            "arguments" -> targetCall.argument.code.l
+          )
+          
+          Map(
+            "success" -> true,
+            "slice" -> Map(
+              "target_call" -> targetCallMap,
+              "dataflow" -> dataflow,
+              "control_dependencies" -> controlDeps
+            ),
+            "total_nodes" -> (1 + dataflow.size + controlDeps.size)
+          )
+        }}
+        case None => {{
+          Map(
+            "success" -> false,
+            "error" -> Map(
+              "code" -> "CALL_NOT_FOUND",
+              "message" -> "No call found at specified location"
             )
+          )
+        }}
+      }}
+    }}
+    case None => {{
+      Map(
+        "success" -> false,
+        "error" -> Map(
+          "code" -> "METHOD_NOT_FOUND",
+          "message" -> "No method found containing the specified line"
+        )
+      )
+    }}
+  }}
+}}.toJsonPretty'''
 
             # Execute the query
-            result = await query_executor.execute_query(
+            result = query_executor.execute_query(
                 codebase_hash=codebase_hash,
                 cpg_path=codebase_info.cpg_path,
                 query=query,
@@ -1083,7 +990,7 @@ resultJson
             }
 
     @mcp.tool()
-    async def find_argument_flows(
+    def find_argument_flows(
         codebase_hash: str,
         source_name: str,
         sink_name: str,
@@ -1186,7 +1093,7 @@ resultJson
             query_executor = services["query_executor"]
 
             # Verify CPG exists for this codebase
-            codebase_info = await codebase_tracker.get_codebase(codebase_hash)
+            codebase_info = codebase_tracker.get_codebase(codebase_hash)
             if not codebase_info or not codebase_info.cpg_path:
                 raise ValidationError(f"CPG not found for codebase {codebase_hash}. Generate it first using generate_cpg.")
 
@@ -1219,7 +1126,7 @@ resultJson
                 f"}}).toJsonPretty"
             )
 
-            result = await query_executor.execute_query(
+            result = query_executor.execute_query(
                 codebase_hash=codebase_hash,
                 cpg_path=codebase_info.cpg_path,
                 query=query,
@@ -1254,7 +1161,7 @@ resultJson
             }
 
     @mcp.tool()
-    async def get_data_dependencies(
+    def get_data_dependencies(
         codebase_hash: str,
         location: str,
         variable: str,
@@ -1347,115 +1254,13 @@ resultJson
             query_executor = services["query_executor"]
 
             # Verify CPG exists for this codebase
-            codebase_info = await codebase_tracker.get_codebase(codebase_hash)
+            codebase_info = codebase_tracker.get_codebase(codebase_hash)
             if not codebase_info or not codebase_info.cpg_path:
                 raise ValidationError(f"CPG not found for codebase {codebase_hash}. Generate it first using generate_cpg.")
 
             # Build inline Scala query (like find_bounds_checks)
             # Wrap in braces to avoid REPL line-by-line interpretation issues
-            query_template = r"""{
-def escapeJson(s: String): String = {
-  s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
-}
-
-val targetLine = LINE_NUM_PLACEHOLDER
-val varName = "VARIABLE_PLACEHOLDER"
-val direction = "DIRECTION_PLACEHOLDER"
-
-val targetMethodOpt = cpg.method.filter(m => {
-  val filename = m.file.name.headOption.getOrElse("")
-  (filename.endsWith("/FILENAME_PLACEHOLDER") || filename == "FILENAME_PLACEHOLDER")
-}).filter(m => {
-  val start = m.lineNumber.getOrElse(-1)
-  val end = m.lineNumberEnd.getOrElse(-1)
-  start <= targetLine && end >= targetLine
-}).headOption
-
-targetMethodOpt match {
-  case Some(method) =>
-    val dependencies = scala.collection.mutable.ListBuffer[String]()
-    
-    if (direction == "backward") {
-      val inits = method.local.name(varName).map { local =>
-        "{\"line\":" + local.lineNumber.getOrElse(-1) + ",\"code\":\"" + escapeJson(local.typeFullName + " " + local.code) + "\",\"type\":\"initialization\",\"filename\":\"" + escapeJson(local.file.name.headOption.getOrElse("unknown")) + "\"}"
-      }.l
-      dependencies ++= inits
-      
-      val assignments = method.assignment.l.filter(assign => {
-        val line = assign.lineNumber.getOrElse(-1)
-        if (line >= targetLine) false
-        else {
-          val targetCode = assign.target.code
-          targetCode == varName || targetCode.startsWith(varName + "[") || targetCode.startsWith(varName + ".")
-        }
-      }).map { assign =>
-        "{\"line\":" + assign.lineNumber.getOrElse(-1) + ",\"code\":\"" + escapeJson(assign.code) + "\",\"type\":\"assignment\",\"filename\":\"" + escapeJson(assign.file.name.headOption.getOrElse("unknown")) + "\"}"
-      }
-      dependencies ++= assignments
-      
-      val modifications = method.call.name("<operator>.(postIncrement|preIncrement|postDecrement|preDecrement|assignmentPlus|assignmentMinus)").l.filter { call =>
-        val line = call.lineNumber.getOrElse(-1)
-        if (line >= targetLine) false
-        else {
-          val args = call.argument.code.l
-          args.exists(arg => arg == varName || arg.startsWith(varName + "[") || arg.startsWith(varName + "."))
-        }
-      }.map { call =>
-        "{\"line\":" + call.lineNumber.getOrElse(-1) + ",\"code\":\"" + escapeJson(call.code) + "\",\"type\":\"modification\",\"filename\":\"" + escapeJson(call.file.name.headOption.getOrElse("unknown")) + "\"}"
-      }
-      dependencies ++= modifications
-      
-      val callModifications = method.call.l.filter { call =>
-        val line = call.lineNumber.getOrElse(-1)
-        if (line >= targetLine) false
-        else {
-          val args = call.argument.code.l
-          args.exists(arg => arg == "&" + varName || arg == varName)
-        }
-      }.map { call =>
-        "{\"line\":" + call.lineNumber.getOrElse(-1) + ",\"code\":\"" + escapeJson(call.code) + "\",\"type\":\"function_call\",\"filename\":\"" + escapeJson(call.file.name.headOption.getOrElse("unknown")) + "\"}"
-      }
-      dependencies ++= callModifications
-      
-    } else if (direction == "forward") {
-      val usages = method.call.l.filter { call =>
-        val line = call.lineNumber.getOrElse(-1)
-        if (line <= targetLine) false
-        else {
-          val args = call.argument.code.l
-          args.exists(arg => arg.contains(varName))
-        }
-      }.take(20).map { call =>
-        "{\"line\":" + call.lineNumber.getOrElse(-1) + ",\"code\":\"" + escapeJson(call.code) + "\",\"type\":\"usage\",\"filename\":\"" + escapeJson(call.file.name.headOption.getOrElse("unknown")) + "\"}"
-      }
-      dependencies ++= usages
-      
-      val assignmentsFrom = method.assignment.l.filter { assign =>
-        val line = assign.lineNumber.getOrElse(-1)
-        if (line <= targetLine) false
-        else {
-          val sourceCode = assign.source.code
-          sourceCode.contains(varName)
-        }
-      }.map { assign =>
-        "{\"line\":" + assign.lineNumber.getOrElse(-1) + ",\"code\":\"" + escapeJson(assign.code) + "\",\"type\":\"propagation\",\"filename\":\"" + escapeJson(assign.file.name.headOption.getOrElse("unknown")) + "\"}"
-      }
-      dependencies ++= assignmentsFrom
-    }
-    
-    val sortedDeps = dependencies.sortBy(dep => {
-      val linePattern = "\"line\":(\\d+)".r
-      linePattern.findFirstMatchIn(dep).map(_.group(1).toInt).getOrElse(-1)
-    })
-    
-    val depsJson = sortedDeps.mkString(",")
-    
-    "{\"success\":true,\"target\":{\"file\":\"" + escapeJson(method.filename) + "\",\"line\":" + targetLine + ",\"variable\":\"" + varName + "\",\"method\":\"" + escapeJson(method.name) + "\"},\"direction\":\"" + direction + "\",\"dependencies\":[" + depsJson + "],\"total\":" + sortedDeps.size + "}"
-    
-  case None =>
-    "{\"success\":false,\"error\":{\"code\":\"NOT_FOUND\",\"message\":\"No method found containing line LINE_NUM_PLACEHOLDER in file FILENAME_PLACEHOLDER\"}}"
-}
-}"""
+            query_template = r'{ def escapeJson(s: String): String = { s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t") }; val targetLine = LINE_NUM_PLACEHOLDER; val varName = "VARIABLE_PLACEHOLDER"; val direction = "DIRECTION_PLACEHOLDER"; val targetMethodOpt = cpg.method.filter(m => { val filename = m.file.name.headOption.getOrElse(""); (filename.endsWith("/FILENAME_PLACEHOLDER") || filename == "FILENAME_PLACEHOLDER") }).filter(m => { val start = m.lineNumber.getOrElse(-1); val end = m.lineNumberEnd.getOrElse(-1); start <= targetLine && end >= targetLine }).headOption; targetMethodOpt match { case Some(method) => { val dependencies = scala.collection.mutable.ListBuffer[String](); if (direction == "backward") { val inits = method.local.name(varName).map { local => "{\"line\":" + local.lineNumber.getOrElse(-1) + ",\"code\":\"" + escapeJson(local.typeFullName + " " + local.code) + "\",\"type\":\"initialization\",\"filename\":\"" + escapeJson(local.file.name.headOption.getOrElse("unknown")) + "\"}" }.l; dependencies ++= inits; val assignments = method.assignment.l.filter(assign => { val line = assign.lineNumber.getOrElse(-1); if (line >= targetLine) false else { val targetCode = assign.target.code; targetCode == varName || targetCode.startsWith(varName + "[") || targetCode.startsWith(varName + ".") } }).map { assign => "{\"line\":" + assign.lineNumber.getOrElse(-1) + ",\"code\":\"" + escapeJson(assign.code) + "\",\"type\":\"assignment\",\"filename\":\"" + escapeJson(assign.file.name.headOption.getOrElse("unknown")) + "\"}" }; dependencies ++= assignments; val modifications = method.call.name("<operator>.(postIncrement|preIncrement|postDecrement|preDecrement|assignmentPlus|assignmentMinus)").l.filter { call => { val line = call.lineNumber.getOrElse(-1); if (line >= targetLine) false else { val args = call.argument.code.l; args.exists(arg => arg == varName || arg.startsWith(varName + "[") || arg.startsWith(varName + ".")) } } }.map { call => "{\"line\":" + call.lineNumber.getOrElse(-1) + ",\"code\":\"" + escapeJson(call.code) + "\",\"type\":\"modification\",\"filename\":\"" + escapeJson(call.file.name.headOption.getOrElse("unknown")) + "\"}" }; dependencies ++= modifications; val callModifications = method.call.l.filter { call => { val line = call.lineNumber.getOrElse(-1); if (line >= targetLine) false else { val args = call.argument.code.l; args.exists(arg => arg == "&" + varName || arg == varName) } } }.map { call => "{\"line\":" + call.lineNumber.getOrElse(-1) + ",\"code\":\"" + escapeJson(call.code) + "\",\"type\":\"function_call\",\"filename\":\"" + escapeJson(call.file.name.headOption.getOrElse("unknown")) + "\"}" }; dependencies ++= callModifications } else if (direction == "forward") { val usages = method.call.l.filter { call => { val line = call.lineNumber.getOrElse(-1); if (line <= targetLine) false else { val args = call.argument.code.l; args.exists(arg => arg.contains(varName)) } } }.take(20).map { call => "{\"line\":" + call.lineNumber.getOrElse(-1) + ",\"code\":\"" + escapeJson(call.code) + "\",\"type\":\"usage\",\"filename\":\"" + escapeJson(call.file.name.headOption.getOrElse("unknown")) + "\"}" }; dependencies ++= usages; val assignmentsFrom = method.assignment.l.filter { assign => { val line = assign.lineNumber.getOrElse(-1); if (line <= targetLine) false else { val sourceCode = assign.source.code; sourceCode.contains(varName) } } }.map { assign => "{\"line\":" + assign.lineNumber.getOrElse(-1) + ",\"code\":\"" + escapeJson(assign.code) + "\",\"type\":\"propagation\",\"filename\":\"" + escapeJson(assign.file.name.headOption.getOrElse("unknown")) + "\"}" }; dependencies ++= assignmentsFrom }; val sortedDeps = dependencies.sortBy(dep => { val linePattern = "\"line\":(\\d+)".r; linePattern.findFirstMatchIn(dep).map(_.group(1).toInt).getOrElse(-1) }); val depsJson = sortedDeps.mkString(","); "{\"success\":true,\"target\":{\"file\":\"" + escapeJson(method.filename) + "\",\"line\":" + targetLine + ",\"variable\":\"" + varName + "\",\"method\":\"" + escapeJson(method.name) + "\"},\"direction\":\"" + direction + "\",\"dependencies\":[" + depsJson + "],\"total\":" + sortedDeps.size + "}" } case None => { "{\"success\":false,\"error\":{\"code\":\"NOT_FOUND\",\"message\":\"No method found containing line LINE_NUM_PLACEHOLDER in file FILENAME_PLACEHOLDER\"}}" } } }'
 
             query = (
                 query_template.replace("FILENAME_PLACEHOLDER", filename)
@@ -1465,7 +1270,7 @@ targetMethodOpt match {
             )
 
             # Execute the query
-            result = await query_executor.execute_query(
+            result = query_executor.execute_query(
                 codebase_hash=codebase_hash,
                 cpg_path=codebase_info.cpg_path,
                 query=query,
