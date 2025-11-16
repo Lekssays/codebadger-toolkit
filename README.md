@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/lekssays-codebadger-toolkit-badge.png)](https://mseep.ai/app/lekssays-codebadger-toolkit)
+
 # 🕷️ joern-mcp
 
 A Model Context Protocol (MCP) server that provides AI assistants with static code analysis capabilities using [Joern](https://joern.io)'s Code Property Graph (CPG) technology.
