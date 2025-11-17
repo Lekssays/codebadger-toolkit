@@ -1,11 +1,11 @@
 server:
-  host: ${MCP_HOST:0.0.0.0}
+  host: ${MCP_HOST:127.0.0.1}
   port: ${MCP_PORT:4242}
   log_level: ${MCP_LOG_LEVEL:INFO}
 
 redis:
   host: ${REDIS_HOST:localhost}
-  port: ${REDIS_PORT:6379}
+  port: ${REDIS_PORT:6380}
   password: ${REDIS_PASSWORD:}
   db: ${REDIS_DB:0}
 
@@ -478,3 +478,4 @@ query:
 storage:
   workspace_root: ${WORKSPACE_ROOT:/tmp/codebadger-toolkit}
   cleanup_on_shutdown: ${CLEANUP_ON_SHUTDOWN:true}
+

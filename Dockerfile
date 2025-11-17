@@ -1,31 +1,15 @@
-# Dockerfile for CodeBadger Toolkit Server
-# Container with Joern, Python MCP server, and Redis
+# Dockerfile for Joern Server Container
+# Contains Joern CLI and Redis for CPG generation and caching
 
 FROM eclipse-temurin:21-jdk-jammy
 
-# Install system dependencies including Python 3.12 and Redis
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     curl \
-    git \
     wget \
     unzip \
-    build-essential \
-    software-properties-common \
     redis-server \
-    libffi-dev \
-    libssl-dev \
-    && add-apt-repository ppa:deadsnakes/ppa \
-    && apt-get update \
-    && apt-get install -y \
-    python3.12 \
-    python3.12-venv \
-    python3.12-dev \
-    python3-pip \
     && rm -rf /var/lib/apt/lists/*
-
-# Set Python 3.12 as default
-RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1 \
-    && update-alternatives --install /usr/bin/python python /usr/bin/python3.12 1
 
 # Set Joern version
 ENV JOERN_VERSION=4.0.429
@@ -43,22 +27,10 @@ RUN mkdir -p ${JOERN_HOME} && \
 # Add Joern CLI tools to PATH
 ENV PATH="${JOERN_HOME}/joern-cli:${JOERN_HOME}/joern-cli/bin:${PATH}"
 
-# Create workspace and playground directories
-RUN mkdir -p /workspace /playground /app
+# Create playground directory for CPG storage
+RUN mkdir -p /playground
 
-# Copy MCP server code
-COPY . /app
-WORKDIR /app
-
-# Install Python dependencies
-# Ensure pip/setuptools are available for python3 (pointing to 3.12)
-RUN python3 -m ensurepip --upgrade || true && \
-    python3 -m pip install --upgrade pip setuptools wheel && \
-    python3 -m pip install --no-cache-dir -r requirements.txt && \
-    python3 -m pip uninstall -y cryptography && \
-    python3 -m pip install --no-cache-dir cffi cryptography
-
-# Configure Redis to run in background
+# Configure Redis to run in background and listen on all interfaces
 RUN mkdir -p /var/lib/redis && \
     chown redis:redis /var/lib/redis && \
     sed -i 's/^daemonize no/daemonize yes/' /etc/redis/redis.conf && \
@@ -67,23 +39,19 @@ RUN mkdir -p /var/lib/redis && \
 # Verify Joern installation
 RUN joern --help
 
-# Expose MCP server port only
-EXPOSE 4242
+# Expose Redis port
+EXPOSE 6379
 
-# Create entrypoint script
+# Create entrypoint script that starts Redis
 RUN echo '#!/bin/bash\n\
 set -e\n\
 \n\
 # Start Redis in background\n\
 redis-server /etc/redis/redis.conf\n\
 \n\
-# Wait for Redis to be ready\n\
-sleep 2\n\
-\n\
-# Start MCP server\n\
-cd /app\n\
-exec python3 main.py\n\
-' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+# Keep container running\n\
+tail -f /dev/null\n\
+' > /entrypoint.sh && chmod +x /entrypoint.sh
 
 # Run entrypoint script
-CMD ["/app/entrypoint.sh"]
+CMD ["/entrypoint.sh"]

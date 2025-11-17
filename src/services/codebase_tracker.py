@@ -46,8 +46,10 @@ class CodebaseTracker:
             )
 
             key = self._make_key(codebase_hash)
+            # Convert to dict (which handles metadata JSON serialization)
+            data = codebase.to_dict()
             # Filter out None values for Redis
-            data = {k: v for k, v in codebase.to_dict().items() if v is not None}
+            data = {k: v for k, v in data.items() if v is not None}
             self.redis.client.hset(key, mapping=data)
             
             # Set expiry to 7 days
@@ -82,7 +84,21 @@ class CodebaseTracker:
     def update_codebase(self, codebase_hash: str, **updates) -> None:
         """Update codebase fields"""
         try:
+            import json
+            
             updates["last_accessed"] = datetime.now(timezone.utc).isoformat()
+            
+            # Handle metadata updates - merge with existing metadata
+            if "metadata" in updates and isinstance(updates["metadata"], dict):
+                # Get existing metadata
+                existing = self.get_codebase(codebase_hash)
+                if existing and existing.metadata:
+                    # Merge new metadata with existing
+                    merged_metadata = {**existing.metadata, **updates["metadata"]}
+                    updates["metadata"] = json.dumps(merged_metadata)
+                else:
+                    updates["metadata"] = json.dumps(updates["metadata"])
+            
             # Filter out None values for Redis
             updates = {k: v for k, v in updates.items() if v is not None}
             if updates:  # Only update if there are non-None values

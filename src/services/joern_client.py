@@ -115,10 +115,7 @@ class JoernServerClient:
             True if CPG was loaded successfully, False otherwise
         """
         try:
-            # Prefer importCpg when loading a pre-built cpg.bin file
-            # Use importCpg which takes a path to a saved CPG file
-            import os
-            project_name = os.path.basename(cpg_path)
+            # Use importCpg to load pre-built cpg.bin file
             query = f'importCpg("{cpg_path}")'
             logger.info(f"Loading CPG from {cpg_path}")
             
@@ -126,26 +123,60 @@ class JoernServerClient:
             
             if result.get("success"):
                 logger.info(f"CPG loaded successfully from {cpg_path}")
-                # Ensure the loaded CPG is opened for queries by calling open(project)
+                # Verify the CPG is actually loaded by checking method count
                 try:
-                    open_query = f'open("{project_name}")'
-                    open_result = self.execute_query(open_query, timeout=10)
-                    if open_result.get("success"):
-                        logger.info(f"Opened project {project_name} for queries")
-                        return True
+                    verify_query = "cpg.method.isExternal(false).l.size"
+                    verify_result = self.execute_query(verify_query, timeout=10)
+                    if verify_result.get("success"):
+                        stdout = verify_result.get("stdout", "")
+                        # Extract the number from the output
+                        import re
+                        match = re.search(r'= (\d+)', stdout)
+                        if match:
+                            method_count = int(match.group(1))
+                            logger.info(f"CPG verified: {method_count} methods found")
+                            return True
+                        else:
+                            logger.warning(f"Could not parse method count from: {stdout}")
+                            # Still return True since importCpg succeeded
+                            return True
                     else:
-                        logger.warning(f"Failed to open project {project_name}: {open_result.get('stderr')}")
-                        # Still return True because importCpg succeeded, but queries may fail
+                        logger.warning(f"Could not verify CPG: {verify_result.get('stderr')}")
+                        # Still return True since importCpg succeeded
                         return True
-                except Exception:
-                    # If open fails, still return True because import succeeded
+                except Exception as e:
+                    logger.warning(f"Could not verify CPG: {e}")
+                    # Still return True since importCpg succeeded
                     return True
             else:
-                logger.error(f"Failed to load CPG from {cpg_path}: {result.get('stderr')}")
+                error_msg = result.get('stderr', '')
+                # Check if error mentions connection issues but might have succeeded
+                if "Connection" in error_msg or "reset" in error_msg:
+                    logger.warning(f"Connection issue during importCpg, verifying if CPG loaded anyway")
+                    try:
+                        # Try to verify if CPG is actually there despite connection error
+                        verify_query = "cpg.method.isExternal(false).l.size"
+                        verify_result = self.execute_query(verify_query, timeout=10)
+                        if verify_result.get("success"):
+                            logger.info("CPG verification successful - CPG was loaded despite connection error")
+                            return True
+                    except:
+                        pass
+                
+                logger.error(f"Failed to load CPG from {cpg_path}: {error_msg}")
                 return False
                 
         except Exception as e:
             logger.error(f"Error loading CPG from {cpg_path}: {e}")
+            # Try to verify if CPG might be loaded anyway
+            try:
+                verify_query = "cpg.method.isExternal(false).l.size"
+                verify_result = self.execute_query(verify_query, timeout=10)
+                if verify_result.get("success"):
+                    logger.info("CPG verification successful - CPG was loaded despite exception")
+                    return True
+            except:
+                pass
             return False
 
 

@@ -17,6 +17,7 @@ from src.utils.validators import (
     validate_session_id,
     validate_source_type,
     validate_timeout,
+    resolve_host_path,
 )
 
 
@@ -149,11 +150,8 @@ class TestValidateLocalPath:
 
     def test_valid_local_path(self):
         """Test valid local path"""
-        with patch("os.path.exists", return_value=True), patch(
-            "os.path.isdir", return_value=True
-        ):
-            # Should not raise
-            validate_local_path("/valid/path")
+        # Should not raise - now only checks absolute path
+        validate_local_path("/valid/path")
 
     def test_invalid_local_path_not_absolute(self):
         """Test relative path"""
@@ -161,24 +159,6 @@ class TestValidateLocalPath:
             validate_local_path("relative/path")
 
         assert "Local path must be absolute" in str(exc_info.value)
-
-    def test_invalid_local_path_not_exists(self):
-        """Test non-existent path"""
-        with patch("os.path.exists", return_value=False):
-            with pytest.raises(ValidationError) as exc_info:
-                validate_local_path("/nonexistent/path")
-
-            assert "Path does not exist" in str(exc_info.value)
-
-    def test_invalid_local_path_not_directory(self):
-        """Test path that exists but is not a directory"""
-        with patch("os.path.exists", return_value=True), patch(
-            "os.path.isdir", return_value=False
-        ):
-            with pytest.raises(ValidationError) as exc_info:
-                validate_local_path("/path/to/file.txt")
-
-            assert "Path is not a directory" in str(exc_info.value)
 
 
 class TestValidateCpgqlQuery:
@@ -316,3 +296,57 @@ class TestValidateTimeout:
             validate_timeout(400)
 
         assert "Timeout cannot exceed 300 seconds" in str(exc_info.value)
+
+
+class TestResolveHostPath:
+    """Test host path resolution"""
+
+    def test_valid_host_path(self, tmp_path):
+        """Test resolving valid host path"""
+        result = resolve_host_path(str(tmp_path))
+        assert result == str(tmp_path)
+
+    def test_invalid_host_path_not_absolute(self):
+        """Test relative path"""
+        with pytest.raises(ValidationError) as exc_info:
+            resolve_host_path("relative/path")
+
+        assert "Host path must be absolute" in str(exc_info.value)
+
+    def test_invalid_host_path_with_traversal(self):
+        """Test path with traversal patterns"""
+        with pytest.raises(ValidationError) as exc_info:
+            resolve_host_path("/home/user/../../../etc/passwd")
+
+        assert "Invalid host path" in str(exc_info.value)
+
+    def test_invalid_host_path_system_etc(self):
+        """Test system path /etc"""
+        with pytest.raises(ValidationError) as exc_info:
+            resolve_host_path("/etc/passwd")
+
+        assert "Invalid host path" in str(exc_info.value)
+
+    def test_invalid_host_path_system_sys(self):
+        """Test system path /sys"""
+        with pytest.raises(ValidationError) as exc_info:
+            resolve_host_path("/sys/kernel")
+
+        assert "Invalid host path" in str(exc_info.value)
+
+    def test_invalid_host_path_not_exists(self):
+        """Test non-existent path"""
+        with pytest.raises(ValidationError) as exc_info:
+            resolve_host_path("/nonexistent/path/that/does/not/exist")
+
+        assert "Path does not exist" in str(exc_info.value)
+
+    def test_invalid_host_path_not_directory(self, tmp_path):
+        """Test path that exists but is not a directory"""
+        file_path = tmp_path / "test.txt"
+        file_path.write_text("test")
+        
+        with pytest.raises(ValidationError) as exc_info:
+            resolve_host_path(str(file_path))
+
+        assert "Path is not a directory" in str(exc_info.value)

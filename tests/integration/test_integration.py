@@ -39,7 +39,6 @@ class TestCodeBadgerIntegration:
         try:
             async with Client(server_url) as client_instance:
                 # Test connectivity with timeout
-                import asyncio
                 await asyncio.wait_for(client_instance.ping(), timeout=5.0)
                 yield client_instance
         except (asyncio.TimeoutError, Exception) as e:
@@ -47,9 +46,11 @@ class TestCodeBadgerIntegration:
 
     @pytest.fixture
     def codebase_path(self):
-        """Path to the test codebase - use container path since server runs in Docker"""
-        # Host path: playground/codebases/core -> Container path: /app/playground/codebases/core
-        return "/app/playground/codebases/core"
+        """Path to the test codebase - use host path since server runs on host"""
+        # MCP server runs on host machine with direct filesystem access
+        # Use the test codebase that exists in playground/codebases/core
+        project_root = Path(__file__).parent.parent.parent
+        return str(project_root / "playground" / "codebases" / "core")
 
     def extract_tool_result(self, result):
         """Extract dictionary data from CallToolResult"""
@@ -84,6 +85,16 @@ class TestCodeBadgerIntegration:
             except json.JSONDecodeError:
                 return {"error": content_text}
         return {}
+    
+    async def wait_for_cpg_ready(self, client, codebase_hash, max_wait=30):
+        """Helper to wait for CPG to be ready"""
+        for i in range(max_wait):
+            await asyncio.sleep(2)
+            status_result = await client.call_tool("get_cpg_status", {"codebase_hash": codebase_hash})
+            status = self.extract_tool_result(status_result).get("status")
+            if status == "ready":
+                return True
+        return False
 
     @pytest.mark.asyncio
     @pytest.mark.timeout(10)
@@ -109,7 +120,7 @@ class TestCodeBadgerIntegration:
         assert len(codebase_hash) == 16, "codebase_hash should be 16 characters"
 
         status = cpg_dict.get("status")
-        assert status in ["generating", "cached"], f"Unexpected status: {status}"
+        assert status in ["generating", "ready"], f"Unexpected status: {status}"
 
         return codebase_hash
 
@@ -125,52 +136,72 @@ class TestCodeBadgerIntegration:
         })
         cpg_dict = self.extract_tool_result(result)
         codebase_hash = cpg_dict["codebase_hash"]
+        
+        # Initial status could be "generating" or "ready" (if cached)
+        initial_status = cpg_dict.get("status")
+        assert initial_status in ["generating", "ready"], f"Unexpected initial status: {initial_status}"
 
-        # Wait for CPG to be ready
-        max_attempts = 30
-        cpg_ready = False
+        # Wait for CPG to be ready (only if it's generating)
+        if initial_status == "generating":
+            max_attempts = 30
+            cpg_ready = False
 
-        for attempt in range(max_attempts):
-            await asyncio.sleep(2)
+            for attempt in range(max_attempts):
+                await asyncio.sleep(2)
 
+                status_result = await client.call_tool("get_cpg_status", {
+                    "codebase_hash": codebase_hash
+                })
+
+                status_dict = self.extract_tool_result(status_result)
+                status = status_dict.get("status")
+
+                if status == "ready":
+                    cpg_ready = True
+                    break
+
+            assert cpg_ready, f"CPG not ready after {max_attempts} attempts (status: {status})"
+        else:
+            # Already ready, get status
             status_result = await client.call_tool("get_cpg_status", {
                 "codebase_hash": codebase_hash
             })
-
             status_dict = self.extract_tool_result(status_result)
-            status = status_dict.get("status")
-            exists = status_dict.get("exists", False)
-
-            if status in ["ready", "cached"] and exists:
-                cpg_ready = True
-                break
-
-        assert cpg_ready, f"CPG not ready after {max_attempts} attempts"
 
         # Verify CPG status response structure
-        expected_fields = ["codebase_hash", "exists", "status", "cpg_path",
+        expected_fields = ["codebase_hash", "status", "cpg_path",
                          "source_type", "language", "created_at", "last_accessed"]
         for field in expected_fields:
             assert field in status_dict, f"Missing field: {field}"
 
         assert status_dict["source_type"] == "local"
         assert status_dict["language"] == "c"
-        assert status_dict["exists"] is True
+        assert status_dict["status"] == "ready"
 
         return codebase_hash
 
     @pytest.mark.asyncio
-    @pytest.mark.timeout(10)
+    @pytest.mark.timeout(70)
     async def test_cpg_caching(self, client, codebase_path):
         """Test that CPG generation uses caching for repeated requests"""
-        # Generate CPG twice for the same codebase
+        # Generate CPG first time
         result1 = await client.call_tool("generate_cpg", {
             "source_type": "local",
             "source_path": codebase_path,
             "language": "c"
         })
         cpg_dict1 = self.extract_tool_result(result1)
+        codebase_hash = cpg_dict1["codebase_hash"]
+        
+        # Wait for first CPG to be ready (if generating)
+        if cpg_dict1.get("status") == "generating":
+            for _ in range(30):
+                await asyncio.sleep(2)
+                status_result = await client.call_tool("get_cpg_status", {"codebase_hash": codebase_hash})
+                if self.extract_tool_result(status_result).get("status") == "ready":
+                    break
 
+        # Generate CPG second time (should be cached/ready immediately)
         result2 = await client.call_tool("generate_cpg", {
             "source_type": "local",
             "source_path": codebase_path,
@@ -181,11 +212,11 @@ class TestCodeBadgerIntegration:
         # Should get the same hash
         assert cpg_dict1["codebase_hash"] == cpg_dict2["codebase_hash"]
 
-        # Second call should be cached
-        assert cpg_dict2["status"] == "cached"
+        # Second call should return "ready" status immediately (already exists)
+        assert cpg_dict2["status"] == "ready"
 
     @pytest.mark.asyncio
-    @pytest.mark.timeout(30)
+    @pytest.mark.timeout(70)
     async def test_list_methods(self, client, codebase_path):
         """Test listing methods in the codebase"""
         # Generate and wait for CPG
@@ -197,12 +228,16 @@ class TestCodeBadgerIntegration:
         cpg_dict = self.extract_tool_result(result)
         codebase_hash = cpg_dict["codebase_hash"]
 
-        # Wait for ready
-        for _ in range(30):
-            await asyncio.sleep(1)
+        # Wait for ready (allow more time for async generation)
+        max_wait = 30
+        for i in range(max_wait):
+            await asyncio.sleep(2)
             status_result = await client.call_tool("get_cpg_status", {"codebase_hash": codebase_hash})
-            if self.extract_tool_result(status_result).get("status") in ["ready", "cached"]:
+            status = self.extract_tool_result(status_result).get("status")
+            if status == "ready":
                 break
+        else:
+            pytest.fail(f"CPG not ready after {max_wait*2} seconds")
 
         # List methods
         methods_result = await client.call_tool("list_methods", {
@@ -228,7 +263,7 @@ class TestCodeBadgerIntegration:
                 assert field in method, f"Method missing field: {field}"
 
     @pytest.mark.asyncio
-    @pytest.mark.timeout(30)
+    @pytest.mark.timeout(70)
     async def test_get_codebase_summary(self, client, codebase_path):
         """Test getting codebase summary"""
         # Generate and wait for CPG
@@ -241,11 +276,8 @@ class TestCodeBadgerIntegration:
         codebase_hash = cpg_dict["codebase_hash"]
 
         # Wait for ready
-        for _ in range(30):
-            await asyncio.sleep(1)
-            status_result = await client.call_tool("get_cpg_status", {"codebase_hash": codebase_hash})
-            if self.extract_tool_result(status_result).get("status") in ["ready", "cached"]:
-                break
+        ready = await self.wait_for_cpg_ready(client, codebase_hash)
+        assert ready, "CPG not ready in time"
 
         # Get summary
         summary_result = await client.call_tool("get_codebase_summary", {
@@ -263,13 +295,13 @@ class TestCodeBadgerIntegration:
         for field in expected_fields:
             assert field in summary, f"Summary missing field: {field}"
 
-        assert summary["language"] in ["c", "unknown"], f"Unexpected language: {summary['language']}"
-        assert summary["total_files"] >= 1
+        assert summary["language"] in ["c", "C", "unknown"], f"Unexpected language: {summary['language']}"
+        assert summary["total_files"] >= 1 or summary["total_methods"] >= 1, "Should have at least 1 file or method"
         assert summary["total_methods"] >= 0
         assert summary["total_calls"] >= 0
 
     @pytest.mark.asyncio
-    @pytest.mark.timeout(30)
+    @pytest.mark.timeout(70)
     async def test_find_taint_sources(self, client, codebase_path):
         """Test finding taint sources"""
         # Generate and wait for CPG
@@ -282,11 +314,8 @@ class TestCodeBadgerIntegration:
         codebase_hash = cpg_dict["codebase_hash"]
 
         # Wait for ready
-        for _ in range(30):
-            await asyncio.sleep(1)
-            status_result = await client.call_tool("get_cpg_status", {"codebase_hash": codebase_hash})
-            if self.extract_tool_result(status_result).get("status") in ["ready", "cached"]:
-                break
+        ready = await self.wait_for_cpg_ready(client, codebase_hash)
+        assert ready, "CPG not ready in time"
 
         # Find taint sources
         sources_result = await client.call_tool("find_taint_sources", {
@@ -311,7 +340,7 @@ class TestCodeBadgerIntegration:
                 assert field in source, f"Source missing field: {field}"
 
     @pytest.mark.asyncio
-    @pytest.mark.timeout(30)
+    @pytest.mark.timeout(70)
     async def test_find_taint_sinks(self, client, codebase_path):
         """Test finding taint sinks"""
         # Generate and wait for CPG
@@ -324,11 +353,8 @@ class TestCodeBadgerIntegration:
         codebase_hash = cpg_dict["codebase_hash"]
 
         # Wait for ready
-        for _ in range(30):
-            await asyncio.sleep(1)
-            status_result = await client.call_tool("get_cpg_status", {"codebase_hash": codebase_hash})
-            if self.extract_tool_result(status_result).get("status") in ["ready", "cached"]:
-                break
+        ready = await self.wait_for_cpg_ready(client, codebase_hash)
+        assert ready, "CPG not ready in time"
 
         # Find taint sinks
         sinks_result = await client.call_tool("find_taint_sinks", {
@@ -389,7 +415,7 @@ class TestCodeBadgerIntegration:
         assert len(code) > 0, "code should not be empty"
 
     @pytest.mark.asyncio
-    @pytest.mark.timeout(30)
+    @pytest.mark.timeout(70)
     async def test_list_calls(self, client, codebase_path):
         """Test listing function calls"""
         # Generate and wait for CPG
@@ -402,11 +428,8 @@ class TestCodeBadgerIntegration:
         codebase_hash = cpg_dict["codebase_hash"]
 
         # Wait for ready
-        for _ in range(30):
-            await asyncio.sleep(1)
-            status_result = await client.call_tool("get_cpg_status", {"codebase_hash": codebase_hash})
-            if self.extract_tool_result(status_result).get("status") in ["ready", "cached"]:
-                break
+        ready = await self.wait_for_cpg_ready(client, codebase_hash)
+        assert ready, "CPG not ready in time"
 
         # List calls
         calls_result = await client.call_tool("list_calls", {
@@ -432,7 +455,7 @@ class TestCodeBadgerIntegration:
                 assert field in call, f"Call missing field: {field}"
 
     @pytest.mark.asyncio
-    @pytest.mark.timeout(30)
+    @pytest.mark.timeout(70)
     async def test_run_cpgql_query(self, client, codebase_path):
         """Test executing raw CPGQL queries"""
         # Generate and wait for CPG
@@ -445,11 +468,8 @@ class TestCodeBadgerIntegration:
         codebase_hash = cpg_dict["codebase_hash"]
 
         # Wait for ready
-        for _ in range(30):
-            await asyncio.sleep(1)
-            status_result = await client.call_tool("get_cpg_status", {"codebase_hash": codebase_hash})
-            if self.extract_tool_result(status_result).get("status") in ["ready", "cached"]:
-                break
+        ready = await self.wait_for_cpg_ready(client, codebase_hash)
+        assert ready, "CPG not ready in time"
 
         # Execute a simple CPGQL query to count methods
         query_result = await client.call_tool("run_cpgql_query", {

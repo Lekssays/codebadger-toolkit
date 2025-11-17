@@ -95,7 +95,7 @@ class TestLoadConfig:
             assert config.server.port == 4242
             assert config.server.log_level == "INFO"
             assert config.redis.host == "localhost"
-            assert config.redis.port == 6379
+            assert config.redis.port == 6380
             assert config.redis.password is None
             assert config.redis.db == 0
             assert config.joern.binary_path == "joern"

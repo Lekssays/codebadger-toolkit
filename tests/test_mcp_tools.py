@@ -95,61 +95,99 @@ def temp_workspace():
 class TestMCPTools:
     """Test MCP tools functionality"""
 
-    def test_generate_cpg_github_success(self, mock_services, temp_workspace):
+    @pytest.mark.asyncio
+    async def test_generate_cpg_github_success(self, mock_services, temp_workspace):
         """Test successful CPG generation from GitHub"""
+        # Import core_tools to register the tools
+        from src.tools.core_tools import register_core_tools
+        
         with patch("src.tools.core_tools.os.path.abspath", return_value=temp_workspace), \
              patch("src.tools.core_tools.os.path.dirname", return_value=temp_workspace), \
-             patch("src.tools.core_tools.os.path.join", side_effect=os.path.join):
+             patch("src.tools.core_tools.os.path.join", side_effect=os.path.join), \
+             patch("src.tools.core_tools.os.makedirs"), \
+             patch("src.tools.core_tools.shutil.copytree"), \
+             patch("src.tools.core_tools.shutil.copy2"):
 
             mcp = FakeMCP()
-            register_tools(mcp, mock_services)
+            register_core_tools(mcp, mock_services)
 
             func = mcp.registered.get("generate_cpg")
             assert func is not None
 
-            # Mock the git clone and CPG generation
+            # Mock the git clone
             mock_services["git_manager"].clone_repository.return_value = None
-            # Return a valid CPG path and optional joern_port
-            mock_services["cpg_generator"].generate_cpg.return_value = ("/tmp/test.cpg", None)
 
-            # Call the tool
-            result = func(
+            # Call the tool (async now)
+            result = await func(
                 source_type="github",
                 source_path="https://github.com/test/repo",
                 language="c"
             )
 
-            assert result["codebase_hash"] == "553642871dd4251d"
-            assert result["status"] in ["ready", "cached"]
-            assert "cpg_path" in result
+            # Now it returns "generating" status immediately
+            assert "codebase_hash" in result
+            assert result["status"] == "generating"
+            assert result["source_type"] == "github"
 
-    def test_generate_cpg_cached(self, mock_services, temp_workspace):
+    @pytest.mark.asyncio
+    async def test_generate_cpg_cached(self, mock_services, temp_workspace):
         """Test CPG generation when CPG already exists"""
+        from src.tools.core_tools import register_core_tools
+        
+        # Set up existing codebase in tracker
+        mock_services["codebase_tracker"].get_codebase.return_value = CodebaseInfo(
+            codebase_hash="553642871dd4251d",
+            source_type="github",
+            source_path="https://github.com/test/repo",
+            language="c",
+            cpg_path=os.path.join(temp_workspace, "playground/cpgs/test/cpg.bin"),
+            joern_port=2000,
+            metadata={"status": "ready"}
+        )
+        
         with patch("src.tools.core_tools.os.path.abspath", return_value=temp_workspace), \
              patch("src.tools.core_tools.os.path.dirname", return_value=temp_workspace), \
              patch("src.tools.core_tools.os.path.join", side_effect=os.path.join), \
              patch("src.tools.core_tools.os.path.exists", return_value=True):
 
             mcp = FakeMCP()
-            register_tools(mcp, mock_services)
+            register_core_tools(mcp, mock_services)
 
             func = mcp.registered.get("generate_cpg")
             assert func is not None
 
-            # Call the tool
-            result = func(
+            # Call the tool (async now)
+            result = await func(
                 source_type="github",
                 source_path="https://github.com/test/repo",
                 language="c"
             )
 
-            assert result["status"] == "cached"
+            assert result["status"] == "ready"
             assert "cpg_path" in result
+            assert result["joern_port"] == 2000
 
     def test_get_cpg_status_exists(self, mock_services):
         """Test getting CPG status when CPG exists"""
+        from src.tools.core_tools import register_core_tools
+        
+        # Set up existing codebase with metadata
+        mock_services["codebase_tracker"].get_codebase.return_value = CodebaseInfo(
+            codebase_hash="553642871dd4251d",
+            source_type="github",
+            source_path="https://github.com/test/repo",
+            language="c",
+            cpg_path="/tmp/test.cpg",
+            joern_port=2000,
+            metadata={
+                "status": "ready",
+                "container_codebase_path": "/playground/codebases/553642871dd4251d",
+                "container_cpg_path": "/playground/cpgs/553642871dd4251d/cpg.bin"
+            }
+        )
+        
         mcp = FakeMCP()
-        register_tools(mcp, mock_services)
+        register_core_tools(mcp, mock_services)
 
         func = mcp.registered.get("get_cpg_status")
         assert func is not None
@@ -158,28 +196,34 @@ class TestMCPTools:
             result = func(codebase_hash="553642871dd4251d")
 
         assert result["codebase_hash"] == "553642871dd4251d"
-        assert result["exists"] is True
+        assert result["status"] == "ready"
         assert "cpg_path" in result
+        assert result["container_codebase_path"] == "/playground/codebases/553642871dd4251d"
+        assert result["container_cpg_path"] == "/playground/cpgs/553642871dd4251d/cpg.bin"
 
     def test_get_cpg_status_not_found(self, mock_services):
         """Test getting CPG status when CPG doesn't exist"""
+        from src.tools.core_tools import register_core_tools
+        
         mock_services["codebase_tracker"].get_codebase.return_value = None
 
         mcp = FakeMCP()
-        register_tools(mcp, mock_services)
+        register_core_tools(mcp, mock_services)
 
         func = mcp.registered.get("get_cpg_status")
         assert func is not None
 
         result = func(codebase_hash="nonexistent")
 
-        assert result["exists"] is False
+        assert result["codebase_hash"] == "nonexistent"
         assert result["status"] == "not_found"
 
     def test_list_methods_success(self, mock_services):
         """Test listing methods successfully"""
+        from src.tools.code_browsing_tools import register_code_browsing_tools
+        
         mcp = FakeMCP()
-        register_tools(mcp, mock_services)
+        register_code_browsing_tools(mcp, mock_services)
 
         func = mcp.registered.get("list_methods")
         assert func is not None
@@ -192,8 +236,10 @@ class TestMCPTools:
 
     def test_run_cpgql_query_success(self, mock_services):
         """Test running CPGQL query successfully"""
+        from src.tools.code_browsing_tools import register_code_browsing_tools
+        
         mcp = FakeMCP()
-        register_tools(mcp, mock_services)
+        register_code_browsing_tools(mcp, mock_services)
 
         func = mcp.registered.get("run_cpgql_query")
         assert func is not None
@@ -206,13 +252,15 @@ class TestMCPTools:
 
     def test_run_cpgql_query_invalid(self, mock_services):
         """Test running invalid CPGQL query"""
+        from src.tools.code_browsing_tools import register_code_browsing_tools
+        
         mock_services["query_executor"].execute_query.return_value = QueryResult(
             success=False,
             error="Invalid query syntax"
         )
 
         mcp = FakeMCP()
-        register_tools(mcp, mock_services)
+        register_code_browsing_tools(mcp, mock_services)
 
         func = mcp.registered.get("run_cpgql_query")
         assert func is not None
@@ -224,6 +272,8 @@ class TestMCPTools:
 
     def test_get_codebase_summary_success(self, mock_services):
         """Test getting codebase summary successfully"""
+        from src.tools.code_browsing_tools import register_code_browsing_tools
+        
         # Mock the metadata query
         meta_result = QueryResult(
             success=True,
@@ -252,7 +302,7 @@ class TestMCPTools:
         mock_services["query_executor"].execute_query.side_effect = mock_execute
 
         mcp = FakeMCP()
-        register_tools(mcp, mock_services)
+        register_code_browsing_tools(mcp, mock_services)
 
         func = mcp.registered.get("get_codebase_summary")
         assert func is not None

@@ -1,27 +1,25 @@
 version: '3.8'
 
 services:
-  codebadger-toolkit:
+  # Joern server with Redis (container)
+  codebadger-joern-server:
     build:
       context: .
       dockerfile: Dockerfile
-    image: codebadger-toolkit:latest
-    container_name: codebadger-toolkit-server
+    image: codebadger-joern-server:latest
+    container_name: codebadger-joern-server
     ports:
-      - "4242:4242"
-    environment:
-      - MCP_HOST=0.0.0.0
-      - MCP_PORT=4242
-      - REDIS_HOST=localhost
-      - REDIS_PORT=6379
-      - PYTHONUNBUFFERED=1
+      - "6380:6379"
+      # Expose ports 2000-2999 for Joern servers
+      - "2000-2999:2000-2999"
     volumes:
-      # Mount playground for persistent CPG storage
-      - ./playground:/app/playground
+      # Mount playground for CPG storage (shared with host)
+      - ./playground:/playground
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:4242/mcp"]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 3
-      start_period: 30s
+      start_period: 10s
+

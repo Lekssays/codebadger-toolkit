@@ -96,11 +96,9 @@ def validate_local_path(path: str) -> bool:
     if not os.path.isabs(path):
         raise ValidationError("Local path must be absolute")
 
-    if not os.path.exists(path):
-        raise ValidationError(f"Path does not exist: {path}")
-
-    if not os.path.isdir(path):
-        raise ValidationError(f"Path is not a directory: {path}")
+    # Note: We don't check if the path exists here because it might be a host path
+    # that is not accessible from the container. The copying logic will handle
+    # existence validation.
 
     return True
 
@@ -147,3 +145,38 @@ def validate_timeout(timeout: int, max_timeout: int = 300):
 
     if timeout > max_timeout:
         raise ValidationError(f"Timeout cannot exceed {max_timeout} seconds")
+
+
+def resolve_host_path(host_path: str) -> str:
+    """
+    Validate and resolve a host path.
+    
+    Since the MCP server runs on the host, we can properly validate
+    that the path exists and is a directory.
+    
+    Args:
+        host_path: Absolute path on the host
+        
+    Returns:
+        The resolved absolute path
+        
+    Raises:
+        ValidationError: If path doesn't exist, isn't a directory, or is unsafe
+    """
+    import os
+    
+    if not os.path.isabs(host_path):
+        raise ValidationError(f"Host path must be absolute: {host_path}")
+    
+    # Check for dangerous patterns
+    if ".." in host_path or host_path.startswith("/etc") or host_path.startswith("/sys"):
+        raise ValidationError(f"Invalid host path: {host_path}")
+    
+    # Now we can properly validate existence (running on host)
+    if not os.path.exists(host_path):
+        raise ValidationError(f"Path does not exist: {host_path}")
+    
+    if not os.path.isdir(host_path):
+        raise ValidationError(f"Path is not a directory: {host_path}")
+    
+    return os.path.abspath(host_path)

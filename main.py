@@ -8,6 +8,7 @@ capabilities through the Model Context Protocol (MCP) using Joern's Code Propert
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastmcp import FastMCP
@@ -46,7 +47,15 @@ async def lifespan(mcp: FastMCP):
     # Ensure required directories exist
     import os
     os.makedirs(config.storage.workspace_root, exist_ok=True)
-    os.makedirs("playground/cpgs", exist_ok=True)
+    
+    # Create playground directory relative to project root
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    playground_dir = os.path.join(project_root, "playground")
+    cpgs_dir = os.path.join(playground_dir, "cpgs")
+    codebases_dir = os.path.join(playground_dir, "codebases")
+    
+    os.makedirs(cpgs_dir, exist_ok=True)
+    os.makedirs(codebases_dir, exist_ok=True)
     logger.info("Created required directories")
     
     try:
@@ -69,9 +78,10 @@ async def lifespan(mcp: FastMCP):
         # Initialize port manager for Joern servers
         services['port_manager'] = PortManager()
         
-        # Initialize Joern server manager
+        # Initialize Joern server manager (runs servers inside Docker container)
         services['joern_server_manager'] = JoernServerManager(
-            joern_binary_path=config.joern.binary_path
+            joern_binary_path=config.joern.binary_path,
+            container_name=os.getenv("JOERN_CONTAINER_NAME", "codebadger-joern-server")
         )
         
         # Initialize CPG generator (runs Joern CLI directly in container)

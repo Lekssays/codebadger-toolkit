@@ -2,21 +2,85 @@
 
 A containerized Model Context Protocol (MCP) server providing static code analysis using Joern's Code Property Graph (CPG) technology with support for Java, C/C++, JavaScript, Python, Go, Kotlin, C#, Ghidra, Jimple, PHP, Ruby, and Swift.
 
-## Quick Start
+## Prerequisites
 
-### Build and Run the Container
+Before you begin, make sure you have:
+
+- **Docker** and **Docker Compose** installed
+- **Python 3.10+** (Python 3.13 recommended)
+- **pip** (Python package manager)
+
+To verify your setup:
 
 ```bash
-docker compose up --build
+docker --version
+docker-compose --version
+python --version
+```
+
+## Quick Start
+
+### 1. Install Python Dependencies
+
+```bash
+# Create a virtual environment (optional but recommended)
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+### 2. Start the Docker Services (Joern + Redis)
+
+```bash
+docker compose up -d
+```
+
+This starts:
+- **Joern Server**: Static code analysis engine (runs CPG generation and queries)
+- **Redis**: Metadata storage (tracks codebases, ports, and CPG information)
+
+Verify services are running:
+
+```bash
+docker compose ps
+```
+
+### 3. Start the MCP Server
+
+```bash
+# Set the correct Redis port (maps to container's 6379)
+REDIS_PORT=6380 python main.py
 ```
 
 The MCP server will be available at `http://localhost:4242`.
 
-### Stop the Service
+### 4. Stop All Services
 
 ```bash
-docker compose down
+# Stop MCP server (Ctrl+C in terminal)
+
+# Stop Docker services
+docker-compose down
+
+# Optional: Clean up everything
+bash cleanup.sh
 ```
+
+## Cleanup Script
+
+Use the provided cleanup script to reset your environment:
+
+```bash
+bash cleanup.sh
+```
+
+This will:
+- Stop and remove Docker containers
+- Kill orphaned Joern/MCP processes
+- Clear Python cache (`__pycache__`, `.pytest_cache`)
+- Optionally clear the playground directory (CPGs and cached codebases)
 
 ## Integrations 
 
@@ -100,49 +164,121 @@ Add the following:
 
 Thanks for contributing! Here's a quick guide to get started with running tests and contributing code.
 
-Prerequisites
+### Prerequisites
+
 - Python 3.10+ (3.13 is used in CI)
 - Docker and Docker Compose (for integration tests)
 
-Local development
+### Local Development Setup
+
 1. Create a virtual environment and install dependencies
 
 ```bash
 python -m venv venv
-source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-2. Run unit tests
+2. Start Docker services (for integration tests)
 
 ```bash
-pytest -q
+docker-compose up -d
 ```
 
-3. Run integration tests (requires Docker Compose)
+3. Run unit tests
 
 ```bash
-docker compose up --build -d
-pytest -q tests/integration
-docker compose down
+pytest tests/ -q
 ```
 
-4. Run all tests
+4. Run integration tests (requires Docker Compose running)
 
 ```bash
-pytest -q
+# Start MCP server in background
+REDIS_PORT=6380 python main.py &
+
+# Run integration tests
+pytest tests/integration -q
+
+# Stop MCP server
+pkill -f "python main.py"
 ```
 
-Please follow the repository conventions and open a PR with a clear changelog and tests for changes that affect behavior.
+5. Run all tests
+
+```bash
+pytest tests/ -q
+```
+
+6. Cleanup after testing
+
+```bash
+bash cleanup.sh
+docker-compose down
+```
+
+### Code Contributions
+
+Please follow these guidelines when contributing:
+
+1. Follow repository conventions
+2. Write tests for behavioral changes
+3. Ensure all tests pass before submitting PR
+4. Include a clear changelog in your PR description
+5. Update documentation if needed
 
 ## Configuration
 
-Optional configuration via `config.yaml` (copy from `config.example.yaml`).
+The MCP server can be configured via environment variables or `config.yaml`.
 
-Key settings:
-- Server host/port
-- Redis settings
-- Session timeouts
-- CPG generation settings
+### Environment Variables
+
+Key settings (optional - defaults shown):
+
+```bash
+# Server
+MCP_HOST=0.0.0.0
+MCP_PORT=4242
+
+# Redis (running inside Docker container)
+REDIS_HOST=localhost
+REDIS_PORT=6380        # ⚠️  IMPORTANT: Port 6380 on host maps to 6379 in container
+
+# Joern
+JOERN_BINARY_PATH=joern
+JOERN_JAVA_OPTS="-Xmx4G -Xms2G -XX:+UseG1GC -Dfile.encoding=UTF-8"
+
+# CPG Generation
+CPG_GENERATION_TIMEOUT=600
+MAX_REPO_SIZE_MB=500
+
+# Query
+QUERY_TIMEOUT=30
+QUERY_CACHE_ENABLED=true
+QUERY_CACHE_TTL=300
+```
+
+### Config File
+
+Create a `config.yaml` from `config.example.yaml`:
+
+```bash
+cp config.example.yaml config.yaml
+```
+
+Then customize as needed.
+
+### Important: Redis Port Configuration
+
+Since Redis runs inside the Docker container:
+
+- **Inside container**: Redis listens on `6379`
+- **Host mapping**: Docker maps `6380:6379`
+- **MCP server should use**: `REDIS_PORT=6380`
+
+Always start the MCP server with:
+
+```bash
+REDIS_PORT=6380 python main.py
+```
 
 

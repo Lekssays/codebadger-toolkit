@@ -80,7 +80,7 @@ def load_config(config_path: Optional[str] = None) -> Config:
             ),
             redis=RedisConfig(
                 host=os.getenv("REDIS_HOST", "localhost"),
-                port=int(os.getenv("REDIS_PORT", "6379")),
+                port=int(os.getenv("REDIS_PORT", "6380")),
                 password=os.getenv("REDIS_PASSWORD"),
                 db=int(os.getenv("REDIS_DB", "0")),
             ),
