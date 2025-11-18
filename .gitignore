@@ -137,3 +137,4 @@ playground/codebases/*
 !playground/codebases/core/
 joern-docs.md
 test_scripts/
+codebadger.db

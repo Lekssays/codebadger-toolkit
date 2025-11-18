@@ -10,7 +10,6 @@ from .models import (
     CPGConfig,
     JoernConfig,
     QueryConfig,
-    RedisConfig,
     ServerConfig,
     StorageConfig,
 )
@@ -77,12 +76,6 @@ def load_config(config_path: Optional[str] = None) -> Config:
                 host=os.getenv("MCP_HOST", "0.0.0.0"),
                 port=int(os.getenv("MCP_PORT", "4242")),
                 log_level=os.getenv("MCP_LOG_LEVEL", "INFO"),
-            ),
-            redis=RedisConfig(
-                host=os.getenv("REDIS_HOST", "localhost"),
-                port=int(os.getenv("REDIS_PORT", "6380")),
-                password=os.getenv("REDIS_PASSWORD"),
-                db=int(os.getenv("REDIS_DB", "0")),
             ),
             joern=JoernConfig(
                 binary_path=os.getenv("JOERN_BINARY_PATH", "joern"),
@@ -209,7 +202,6 @@ def _dict_to_config(data: dict) -> Config:
 
     return Config(
         server=convert_config_section(ServerConfig, data.get("server", {})),
-        redis=convert_config_section(RedisConfig, data.get("redis", {})),
         joern=convert_config_section(JoernConfig, data.get("joern", {})),
         cpg=convert_config_section(CPGConfig, data.get("cpg", {})),
         query=convert_config_section(QueryConfig, data.get("query", {})),

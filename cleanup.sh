@@ -1,6 +1,6 @@
 #!/bin/bash
 # Minimal cleanup script for CodeBadger Toolkit
-# Cleans codebases (except core), CPGs, and flushes Redis
+# Cleans codebases (except core) and CPGs
 
 set -e
 
@@ -29,9 +29,14 @@ else
     echo "⚠ CPGs directory not found"
 fi
 
-# Flush Redis inside container
-echo "Flushing Redis..."
-docker exec codebadger-joern-server redis-cli FLUSHALL >/dev/null 2>&1 && echo "✓ Redis flushed" || echo "⚠ Redis flush failed (container may not be running)"
+# Clean SQLite database
+if [ -f "codebadger.db" ]; then
+    echo "Cleaning SQLite database..."
+    rm "codebadger.db"
+    echo "✓ SQLite database removed"
+else
+    echo "⚠ SQLite database not found"
+fi
 
 echo ""
 echo "✅ Cleanup complete!"

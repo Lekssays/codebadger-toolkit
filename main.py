@@ -24,7 +24,7 @@ from src.services import (
     PortManager,
     QueryExecutor
 )
-from src.utils import RedisClient, SyncRedisClient, setup_logging
+from src.utils import DBManager, setup_logging
 from src.tools import register_tools
 
 # Version information - bump this when releasing new versions
@@ -59,20 +59,15 @@ async def lifespan(mcp: FastMCP):
     logger.info("Created required directories")
     
     try:
-        # Initialize Redis clients
-        redis_client = RedisClient(config.redis)
-        await redis_client.connect()
+        # Initialize DB Manager
+        db_manager = DBManager(os.path.join(project_root, "codebadger.db"))
         
-        sync_redis_client = SyncRedisClient(config.redis)
-        sync_redis_client.connect()
-        
-        logger.info("Redis clients connected")
+        logger.info("DB Manager initialized")
         
         # Initialize services
         services['config'] = config
-        services['redis'] = redis_client
-        services['sync_redis'] = sync_redis_client
-        services['codebase_tracker'] = CodebaseTracker(sync_redis_client)
+        services['db_manager'] = db_manager
+        services['codebase_tracker'] = CodebaseTracker(db_manager)
         services['git_manager'] = GitManager(config.storage.workspace_root)
         
         # Initialize port manager for Joern servers

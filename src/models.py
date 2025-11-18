@@ -120,17 +120,6 @@ class ServerConfig:
 
 
 @dataclass
-class RedisConfig:
-    """Redis configuration"""
-
-    host: str = "localhost"
-    port: int = 6379
-    password: Optional[str] = None
-    db: int = 0
-    decode_responses: bool = True
-
-
-@dataclass
 class CPGConfig:
     """CPG generation configuration"""
 
@@ -165,7 +154,6 @@ class Config:
     """Main configuration"""
 
     server: ServerConfig = field(default_factory=ServerConfig)
-    redis: RedisConfig = field(default_factory=RedisConfig)
     joern: JoernConfig = field(default_factory=JoernConfig)
     cpg: CPGConfig = field(default_factory=CPGConfig)
     query: QueryConfig = field(default_factory=QueryConfig)

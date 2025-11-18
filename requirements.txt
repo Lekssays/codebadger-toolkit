@@ -9,7 +9,6 @@ pydantic==2.11.10
 docker==7.1.0
 gitpython==3.1.45
 PyYAML==6.0.3
-redis==6.4.0
 
 # Development dependencies
 pytest==8.4.2

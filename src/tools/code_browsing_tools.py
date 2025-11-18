@@ -27,7 +27,9 @@ def register_code_browsing_tools(mcp, services: dict):
         file_pattern: Optional[str] = None,
         callee_pattern: Optional[str] = None,
         include_external: bool = False,
-        limit: int = 100,
+        limit: int = 1000,
+        page: int = 1,
+        page_size: int = 100,
     ) -> Dict[str, Any]:
         """
         List methods/functions in the codebase.
@@ -43,18 +45,18 @@ def register_code_browsing_tools(mcp, services: dict):
             callee_pattern: Optional regex to filter for methods that call a specific function
                 (e.g., "memcpy|free|malloc")
             include_external: Include external/library methods (default: false)
-            limit: Maximum number of results to return. This can be overridden. Default is 100.
+            limit: Maximum number of results to fetch for caching (default: 1000)
+            page: Page number (default: 1)
+            page_size: Number of results per page (default: 100)
 
         Returns:
             {
                 "success": true,
-                "methods": [
-                    {
-                        "node_id": "12345",
-                        "name": "main",
-                    }
-                ],
-                "total": 1
+                "methods": [...],
+                "total": 100,
+                "page": 1,
+                "page_size": 100,
+                "total_pages": 1
             }
         """
         try:
@@ -62,68 +64,101 @@ def register_code_browsing_tools(mcp, services: dict):
 
             codebase_tracker = services["codebase_tracker"]
             query_executor = services["query_executor"]
+            db_manager = services.get("db_manager")
 
-            # Verify CPG exists for this codebase
-            codebase_info = codebase_tracker.get_codebase(codebase_hash)
-            if not codebase_info or not codebase_info.cpg_path:
-                raise ValidationError(f"CPG not found for codebase {codebase_hash}. Generate it first using generate_cpg.")
+            # Check cache first
+            cache_params = {
+                "name_pattern": name_pattern,
+                "file_pattern": file_pattern,
+                "callee_pattern": callee_pattern,
+                "include_external": include_external,
+            }
+            
+            methods = None
+            if db_manager:
+                methods = db_manager.get_cached_tool_output("list_methods", codebase_hash, cache_params)
 
-            # Build query with filters
-            query_parts = ["cpg.method"]
+            if methods is None:
+                # Verify CPG exists for this codebase
+                codebase_info = codebase_tracker.get_codebase(codebase_hash)
+                if not codebase_info or not codebase_info.cpg_path:
+                    raise ValidationError(f"CPG not found for codebase {codebase_hash}. Generate it first using generate_cpg.")
 
-            if not include_external:
-                query_parts.append(".isExternal(false)")
+                # Build query with filters
+                query_parts = ["cpg.method"]
 
-            if name_pattern:
-                query_parts.append(f'.name("{name_pattern}")')
+                if not include_external:
+                    query_parts.append(".isExternal(false)")
 
-            if file_pattern:
-                query_parts.append(f'.where(_.file.name("{file_pattern}"))')
+                if name_pattern:
+                    query_parts.append(f'.name("{name_pattern}")')
 
-            if callee_pattern:
-                query_parts.append(f'.where(_.callOut.name("{callee_pattern}"))')
+                if file_pattern:
+                    query_parts.append(f'.where(_.file.name("{file_pattern}"))')
 
-            query_parts.append(
-                ".map(m => (m.name, m.id, m.fullName, m.signature, m.filename, m.lineNumber.getOrElse(-1), m.isExternal))"
-            )
+                if callee_pattern:
+                    query_parts.append(f'.where(_.callOut.name("{callee_pattern}"))')
 
-            query = "".join(query_parts) + f".dedup.take({limit}).l"
+                query_parts.append(
+                    ".map(m => (m.name, m.id, m.fullName, m.signature, m.filename, m.lineNumber.getOrElse(-1), m.isExternal))"
+                )
 
-            logger.info(f"list_methods query: {query}")
+                # TODO: Move this to CPG generation phase
+                query_limit = max(limit, 10000)
+                query = "".join(query_parts) + f".dedup.take({query_limit}).l"
 
-            result = query_executor.execute_query(
-                codebase_hash=codebase_hash,
-                cpg_path=codebase_info.cpg_path,
-                query=query,
-                timeout=30,
-                limit=limit,
-            )
+                logger.info(f"list_methods query: {query}")
 
-            if not result.success:
-                return {
-                    "success": False,
-                    "error": {"code": "QUERY_ERROR", "message": result.error},
-                }
+                result = query_executor.execute_query(
+                    codebase_hash=codebase_hash,
+                    cpg_path=codebase_info.cpg_path,
+                    query=query,
+                    timeout=30,
+                    limit=query_limit,
+                )
 
-            methods = []
-            logger.info(f"Raw result data: {result.data[:3]}")  # Debug logging
-            for item in result.data:
-                # Map tuple fields: _1=id, _2=name, _3=fullName, _4=signature,
-                # _5=filename, _6=lineNumber, _7=isExternal
-                if isinstance(item, dict):
-                    methods.append(
-                        {
-                            "node_id": str(item.get("_1", "")),
-                            "name": item.get("_2", ""),
-                            "fullName": item.get("_3", ""),
-                            "signature": item.get("_4", ""),
-                            "filename": item.get("_5", ""),
-                            "lineNumber": item.get("_6", -1),
-                            "isExternal": item.get("_7", False),
-                        }
-                    )
+                if not result.success:
+                    return {
+                        "success": False,
+                        "error": {"code": "QUERY_ERROR", "message": result.error},
+                    }
 
-            return {"success": True, "methods": methods, "total": len(methods)}
+                methods = []
+                logger.info(f"Raw result data: {result.data[:3]}")  # Debug logging
+                for item in result.data:
+                    # Map tuple fields: _1=id, _2=name, _3=fullName, _4=signature,
+                    # _5=filename, _6=lineNumber, _7=isExternal
+                    if isinstance(item, dict):
+                        methods.append(
+                            {
+                                "node_id": str(item.get("_1", "")),
+                                "name": item.get("_2", ""),
+                                "fullName": item.get("_3", ""),
+                                "signature": item.get("_4", ""),
+                                "filename": item.get("_5", ""),
+                                "lineNumber": item.get("_6", -1),
+                                "isExternal": item.get("_7", False),
+                            }
+                        )
+                
+                # Cache the result
+                if db_manager:
+                    db_manager.cache_tool_output("list_methods", codebase_hash, cache_params, methods)
+
+            # Pagination
+            total = len(methods)
+            start_idx = (page - 1) * page_size
+            end_idx = start_idx + page_size
+            paged_methods = methods[start_idx:end_idx]
+
+            return {
+                "success": True, 
+                "methods": paged_methods, 
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+                "total_pages": (total + page_size - 1) // page_size if page_size > 0 else 1
+            }
 
         except ValidationError as e:
             logger.error(f"Error listing methods: {e}")
@@ -304,7 +339,9 @@ def register_code_browsing_tools(mcp, services: dict):
         codebase_hash: str,
         caller_pattern: Optional[str] = None,
         callee_pattern: Optional[str] = None,
-        limit: int = 100,
+        limit: int = 1000,
+        page: int = 1,
+        page_size: int = 100,
     ) -> Dict[str, Any]:
         """
         List function/method calls in the codebase.
@@ -316,21 +353,18 @@ def register_code_browsing_tools(mcp, services: dict):
             codebase_hash: The session ID from create_cpg_session
             caller_pattern: Optional regex to filter caller method names
             callee_pattern: Optional regex to filter callee method names
-            limit: Maximum number of results (default: 100)
+            limit: Maximum number of results to fetch for caching (default: 1000)
+            page: Page number (default: 1)
+            page_size: Number of results per page (default: 100)
 
         Returns:
             {
                 "success": true,
-                "calls": [
-                    {
-                        "caller": "main",
-                        "callee": "helper",
-                        "code": "helper(x)",
-                        "filename": "main.c",
-                        "lineNumber": 15
-                    }
-                ],
-                "total": 1
+                "calls": [...],
+                "total": 100,
+                "page": 1,
+                "page_size": 100,
+                "total_pages": 1
             }
         """
         try:
@@ -338,57 +372,88 @@ def register_code_browsing_tools(mcp, services: dict):
 
             codebase_tracker = services["codebase_tracker"]
             query_executor = services["query_executor"]
+            db_manager = services.get("db_manager")
 
-            # Verify CPG exists for this codebase
-            codebase_info = codebase_tracker.get_codebase(codebase_hash)
-            if not codebase_info or not codebase_info.cpg_path:
-                raise ValidationError(f"CPG not found for codebase {codebase_hash}. Generate it first using generate_cpg.")
+            # Check cache first
+            cache_params = {
+                "caller_pattern": caller_pattern,
+                "callee_pattern": callee_pattern,
+            }
+            
+            calls = None
+            if db_manager:
+                calls = db_manager.get_cached_tool_output("list_calls", codebase_hash, cache_params)
 
-            # Build query
-            query_parts = ["cpg.call"]
+            if calls is None:
+                # Verify CPG exists for this codebase
+                codebase_info = codebase_tracker.get_codebase(codebase_hash)
+                if not codebase_info or not codebase_info.cpg_path:
+                    raise ValidationError(f"CPG not found for codebase {codebase_hash}. Generate it first using generate_cpg.")
 
-            if callee_pattern:
-                query_parts.append(f'.name("{callee_pattern}")')
+                # Build query
+                query_parts = ["cpg.call"]
 
-            if caller_pattern:
-                query_parts.append(f'.where(_.method.name("{caller_pattern}"))')
+                if callee_pattern:
+                    query_parts.append(f'.name("{callee_pattern}")')
 
-            query_parts.append(
-                ".map(c => (c.method.name, c.name, c.code, c.method.filename, c.lineNumber.getOrElse(-1)))"
-            )
+                if caller_pattern:
+                    query_parts.append(f'.where(_.method.name("{caller_pattern}"))')
 
-            query = "".join(query_parts) + f".dedup.take({limit}).toJsonPretty"
+                query_parts.append(
+                    ".map(c => (c.method.name, c.name, c.code, c.method.filename, c.lineNumber.getOrElse(-1)))"
+                )
 
-            logger.info(f"list_calls query: {query}")
+                # TODO: Move this to CPG generation phase
+                query_limit = max(limit, 10000)
+                query = "".join(query_parts) + f".dedup.take({query_limit}).toJsonPretty"
 
-            result = query_executor.execute_query(
-                codebase_hash=codebase_hash,
-                cpg_path=codebase_info.cpg_path,
-                query=query,
-                timeout=30,
-                limit=limit,
-            )
+                logger.info(f"list_calls query: {query}")
 
-            if not result.success:
-                return {
-                    "success": False,
-                    "error": {"code": "QUERY_ERROR", "message": result.error},
-                }
+                result = query_executor.execute_query(
+                    codebase_hash=codebase_hash,
+                    cpg_path=codebase_info.cpg_path,
+                    query=query,
+                    timeout=30,
+                    limit=query_limit,
+                )
 
-            calls = []
-            for item in result.data:
-                if isinstance(item, dict):
-                    calls.append(
-                        {
-                            "caller": item.get("_1", ""),
-                            "callee": item.get("_2", ""),
-                            "code": item.get("_3", ""),
-                            "filename": item.get("_4", ""),
-                            "lineNumber": item.get("_5", -1),
-                        }
-                    )
+                if not result.success:
+                    return {
+                        "success": False,
+                        "error": {"code": "QUERY_ERROR", "message": result.error},
+                    }
 
-            return {"success": True, "calls": calls, "total": len(calls)}
+                calls = []
+                for item in result.data:
+                    if isinstance(item, dict):
+                        calls.append(
+                            {
+                                "caller": item.get("_1", ""),
+                                "callee": item.get("_2", ""),
+                                "code": item.get("_3", ""),
+                                "filename": item.get("_4", ""),
+                                "lineNumber": item.get("_5", -1),
+                            }
+                        )
+                
+                # Cache the result
+                if db_manager:
+                    db_manager.cache_tool_output("list_calls", codebase_hash, cache_params, calls)
+
+            # Pagination
+            total = len(calls)
+            start_idx = (page - 1) * page_size
+            end_idx = start_idx + page_size
+            paged_calls = calls[start_idx:end_idx]
+
+            return {
+                "success": True, 
+                "calls": paged_calls, 
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+                "total_pages": (total + page_size - 1) // page_size if page_size > 0 else 1
+            }
 
         except ValidationError as e:
             logger.error(f"Error listing calls: {e}")
