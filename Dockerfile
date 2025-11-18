@@ -22,7 +22,7 @@ RUN mkdir -p ${JOERN_HOME} && \
     chmod +x joern-install.sh && \
     sed -i 's/sudo //g' joern-install.sh && \
     ./joern-install.sh && \
-    rm -rf joern-install.sh
+    rm -rf joern-install.sh joern-cli.zip
 
 # Add Joern CLI tools to PATH
 ENV PATH="${JOERN_HOME}/joern-cli:${JOERN_HOME}/joern-cli/bin:${PATH}"
