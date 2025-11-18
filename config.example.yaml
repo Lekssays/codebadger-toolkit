@@ -212,128 +212,274 @@ cpg:
       - fread
       - recvfrom
       - recvmsg
+      - getopt
+      - getopt_long
+      - getpass
+      - getpwuid
+      - getgrgid
+      - gethostbyname
+      - getaddrinfo
+      - socket
+      - listen
+      - bind
+      - connect
     cpp:
-      - std::cin
-      - getline
+      - getenv
+      - fgets
+      - scanf
+      - read
       - recv
       - accept
       - fopen
-      - std::ifstream
-      - std::fstream
-      - std::getline
+      - gets
+      - getchar
+      - fscanf
+      - fread
+      - recvfrom
+      - recvmsg
+      - cin
+      - getline
+      - getopt
+      - getopt_long
+      - getpass
+      - getpwuid
+      - getgrgid
+      - gethostbyname
+      - getaddrinfo
+      - socket
+      - listen
+      - bind
+      - connect
     java:
-      - java.util.Scanner.next
-      - java.util.Scanner.nextLine
-      - java.io.BufferedReader.readLine
-      - java.lang.System.in.read
-      - javax.servlet.http.HttpServletRequest.getParameter
-      - javax.servlet.http.HttpServletRequest.getQueryString
-      - javax.servlet.http.HttpServletRequest.getHeader
-      - java.io.FileInputStream
-      - java.io.FileReader
-      - java.net.Socket.getInputStream
-      - java.net.ServerSocket.accept
+      - getParameter
+      - getQueryString
+      - getHeader
+      - getCookie
+      - getCookies
+      - getRemoteAddr
+      - getRemoteHost
+      - getRemoteUser
+      - getAuthType
+      - getProtocol
+      - getScheme
+      - getServerName
+      - getServerPort
+      - getRequestURI
+      - getRequestURL
+      - getServletPath
+      - getContextPath
+      - getPathInfo
+      - getPathTranslated
+      - getReader
+      - getInputStream
+      - getPart
+      - getParts
+      - getLocales
+      - getLocale
+      - getAttribute
+      - getAttributeNames
+      - getInitParameter
+      - getInitParameterNames
+      - System.getenv
+      - System.getProperty
+      - Scanner.next
+      - Scanner.nextLine
+      - BufferedReader.readLine
+      - Console.readLine
+      - DataInputStream.readUTF
+      - ObjectInputStream.readObject
+      - Socket.getInputStream
+      - ServerSocket.accept
     javascript:
-      - prompt
-      - document.location
-      - window.location
-      - req.query
       - req.body
+      - req.query
       - req.params
-      - process.argv
+      - req.headers
+      - req.cookies
+      - req.files
+      - req.file
+      - req.url
+      - req.originalUrl
+      - req.path
+      - req.hostname
+      - req.ip
+      - req.ips
+      - req.protocol
+      - req.get
+      - req.header
+      - req.accepts
+      - req.acceptsCharsets
+      - req.acceptsEncodings
+      - req.acceptsLanguages
       - process.env
+      - process.argv
       - fs.readFile
       - fs.readFileSync
-      - readline.question
+      - fs.createReadStream
+      - http.get
+      - https.get
+      - axios.get
+      - fetch
+      - XMLHttpRequest
+      - WebSocket
+      - socket.on
+      - prompt
+      - readline
     python:
       - input
+      - raw_input
       - sys.argv
       - os.environ
-      - request.args
-      - request.form
-      - request.values
-      - sys.stdin.read
-      - sys.stdin.readline
-      - open
-      - file.read
+      - os.getenv
+      - flask.request.args
+      - flask.request.form
+      - flask.request.values
+      - flask.request.cookies
+      - flask.request.headers
+      - flask.request.json
+      - flask.request.data
+      - flask.request.files
+      - django.request.GET
+      - django.request.POST
+      - django.request.COOKIES
+      - django.request.META
+      - django.request.FILES
+      - django.request.body
+      - django.request.path
+      - django.request.path_info
+      - django.request.method
+      - django.request.resolver_match
+      - django.request.content_type
+      - django.request.content_params
+      - bottle.request.args
+      - bottle.request.forms
+      - bottle.request.files
+      - bottle.request.query
+      - bottle.request.params
+      - bottle.request.GET
+      - bottle.request.POST
+      - bottle.request.cookies
+      - bottle.request.headers
+      - bottle.request.json
+      - bottle.request.body
+      - pyramid.request.GET
+      - pyramid.request.POST
+      - pyramid.request.params
+      - pyramid.request.body
+      - pyramid.request.json
+      - pyramid.request.cookies
+      - pyramid.request.headers
+      - aiohttp.request.match_info
+      - aiohttp.request.query
+      - aiohttp.request.post
+      - aiohttp.request.json
+      - aiohttp.request.content
+      - aiohttp.request.text
+      - aiohttp.request.read
+      - tornado.request.query
+      - tornado.request.body
+      - tornado.request.files
+      - tornado.request.cookies
+      - tornado.request.headers
+      - falcon.request.params
+      - falcon.request.media
+      - falcon.request.stream
+      - falcon.request.headers
+      - falcon.request.cookies
+      - socket.recv
+      - socket.recvfrom
+      - socket.recvmsg
+      - socket.recv_into
+      - socket.recvfrom_into
+      - socket.recvmsg_into
     go:
-      - bufio.Scanner.Scan
-      - bufio.Scanner.Text
       - os.Args
       - os.Getenv
-      - http.Request.FormValue
-      - http.Request.PostFormValue
-      - http.Request.Header
-      - io.ReadAll
-      - os.Open
-      - net.Conn.Read
-    kotlin:
-      - java.util.Scanner.next
-      - java.util.Scanner.nextLine
-      - kotlin.io.readLine
-      - kotlin.io.readln
-      - javax.servlet.http.HttpServletRequest.getParameter
-      - java.io.FileInputStream
-      - java.net.Socket.getInputStream
-      - kotlin.collections.get
-      - kotlin.collections.elementAt
+      - os.Environ
+      - flag.String
+      - flag.Int
+      - flag.Bool
+      - flag.Float64
+      - flag.Duration
+      - flag.Var
+      - flag.Parse
+      - net/http.Request.FormValue
+      - net/http.Request.PostFormValue
+      - net/http.Request.Form
+      - net/http.Request.PostForm
+      - net/http.Request.MultipartForm
+      - net/http.Request.Header
+      - net/http.Request.Body
+      - net/http.Request.URL.Query
+      - net/http.Request.Cookies
+      - net/http.Request.Cookie
+      - net/http.Request.UserAgent
+      - net/http.Request.Referer
+      - io/ioutil.ReadAll
+      - bufio.NewReader
+      - bufio.NewScanner
+      - fmt.Scan
+      - fmt.Scanf
+      - fmt.Scanln
+      - fmt.Fscan
+      - fmt.Fscanf
+      - fmt.Fscanln
     csharp:
-      - System.Console.ReadLine
-      - System.Console.Read
+      - Console.ReadLine
+      - Console.Read
       - System.Environment.GetEnvironmentVariable
-      - System.Environment.GetEnvironmentVariables
-      - Microsoft.AspNetCore.Http.HttpRequest.Query
-      - Microsoft.AspNetCore.Http.HttpRequest.Form
-      - Microsoft.AspNetCore.Http.HttpRequest.Headers
+      - System.Environment.GetCommandLineArgs
+      - Request.QueryString
+      - Request.Form
+      - Request.Cookies
+      - Request.Headers
+      - Request.Params
+      - Request.BinaryRead
+      - Request.InputStream
+      - Request.Url
+      - Request.UserHostAddress
+      - Request.UserHostName
+      - Request.UserAgent
+      - Request.ServerVariables
       - System.IO.File.ReadAllText
       - System.IO.File.ReadAllLines
+      - System.IO.File.ReadAllBytes
+      - System.IO.StreamReader.ReadLine
       - System.IO.StreamReader.ReadToEnd
-    ghidra:
-      - getBytes
-      - getString
-      - getInt
-      - getLong
-      - read
-      - readByte
-      - readInt
-      - readLong
-    jimple:
-      - java.util.Scanner.next
-      - java.util.Scanner.nextLine
-      - java.io.BufferedReader.readLine
-      - java.lang.System.in.read
-      - javax.servlet.http.HttpServletRequest.getParameter
+      - System.Net.Sockets.Socket.Receive
+      - System.Net.WebClient.DownloadString
+      - System.Net.WebClient.DownloadData
+      - System.Net.Http.HttpClient.GetStringAsync
+      - System.Net.Http.HttpClient.GetByteArrayAsync
+      - System.Net.Http.HttpClient.GetStreamAsync
     php:
       - $_GET
       - $_POST
-      - $_REQUEST
       - $_COOKIE
+      - $_REQUEST
+      - $_FILES
       - $_SERVER
+      - $_ENV
+      - $HTTP_GET_VARS
+      - $HTTP_POST_VARS
+      - $HTTP_COOKIE_VARS
+      - $HTTP_POST_FILES
+      - $HTTP_SERVER_VARS
+      - $HTTP_ENV_VARS
       - getenv
       - file_get_contents
       - fread
       - fgets
-      - filter_input
-    ruby:
-      - gets
-      - readline
-      - ARGV
-      - ENV
-      - params
-      - request.params
-      - request.query_parameters
-      - request.request_parameters
-      - File.read
-      - IO.read
-    swift:
-      - readLine
-      - CommandLine.arguments
-      - ProcessInfo.processInfo.environment
-      - URLSession.dataTask
-      - FileManager.contents
-      - InputStream.read
-      - String.init
-      - Data.init
+      - fgetc
+      - file
+      - readfile
+      - socket_read
+      - socket_recv
+      - socket_recvfrom
+      - socket_recvmsg
+      - stream_get_contents
+      - stream_get_line
+
   taint_sinks:
     c:
       - system
@@ -341,134 +487,461 @@ cpg:
       - execl
       - execv
       - execve
+      - execlp
+      - execvp
+      - execvpe
+      - execle
       - sprintf
       - fprintf
       - snprintf
       - vsprintf
       - vfprintf
+      - vsnprintf
       - strcpy
       - strcat
       - gets
+      - memcpy
+      - memmove
+      - memset
+      - strncpy
+      - strncat
+      - strtok
+      - strtok_r
+      - realpath
+      - syslog
+      - open
+      - openat
+      - creat
+      - fopen
+      - freopen
+      - fdopen
+      - popen
+      - tmpfile
+      - mkstemp
+      - mkdtemp
+      - mktemp
+      - remove
+      - rename
+      - link
+      - symlink
+      - unlink
+      - mkdir
+      - rmdir
+      - chdir
+      - fchdir
+      - chroot
+      - chmod
+      - fchmod
+      - chown
+      - fchown
+      - lchown
+      - truncate
+      - ftruncate
+      - access
+      - faccessat
+      - stat
+      - fstat
+      - lstat
+      - statat
+      - utime
+      - utimes
+      - futimes
+      - lutimes
+      - futimens
+      - utimensat
+      - connect
+      - bind
+      - send
+      - sendto
+      - sendmsg
+      - write
+      - writev
+      - pwrite
+      - pwritev
+      - printf
+      - vprintf
+      - dprintf
+      - vdprintf
+      - scanf
+      - fscanf
+      - sscanf
+      - vscanf
+      - vfscanf
+      - vsscanf
+      - malloc
+      - calloc
+      - realloc
+      - free
+      - alloca
     cpp:
       - system
       - popen
-      - std::ofstream
+      - execl
+      - execv
+      - execve
+      - execlp
+      - execvp
+      - execvpe
+      - execle
       - sprintf
+      - fprintf
       - snprintf
-      - std::string.operator+
+      - vsprintf
+      - vfprintf
+      - vsnprintf
       - strcpy
       - strcat
-      - std::system
+      - gets
+      - memcpy
+      - memmove
+      - memset
+      - strncpy
+      - strncat
+      - strtok
+      - strtok_r
+      - realpath
+      - syslog
+      - open
+      - openat
+      - creat
+      - fopen
+      - freopen
+      - fdopen
+      - popen
+      - tmpfile
+      - mkstemp
+      - mkdtemp
+      - mktemp
+      - remove
+      - rename
+      - link
+      - symlink
+      - unlink
+      - mkdir
+      - rmdir
+      - chdir
+      - fchdir
+      - chroot
+      - chmod
+      - fchmod
+      - chown
+      - fchown
+      - lchown
+      - truncate
+      - ftruncate
+      - access
+      - faccessat
+      - stat
+      - fstat
+      - lstat
+      - statat
+      - utime
+      - utimes
+      - futimes
+      - lutimes
+      - futimens
+      - utimensat
+      - connect
+      - bind
+      - send
+      - sendto
+      - sendmsg
+      - write
+      - writev
+      - pwrite
+      - pwritev
+      - printf
+      - vprintf
+      - dprintf
+      - vdprintf
+      - scanf
+      - fscanf
+      - sscanf
+      - vscanf
+      - vfscanf
+      - vsscanf
+      - malloc
+      - calloc
+      - realloc
+      - free
+      - alloca
+      - cin
+      - cout
+      - cerr
+      - clog
+      - wcin
+      - wcout
+      - wcerr
+      - wclog
     java:
-      - java.lang.Runtime.exec
-      - java.lang.ProcessBuilder
-      - java.sql.Statement.executeQuery
-      - java.sql.PreparedStatement.executeQuery
-      - java.io.FileWriter
+      - Runtime.exec
+      - ProcessBuilder.start
+      - System.load
+      - System.loadLibrary
+      - java.io.File
+      - java.io.FileInputStream
       - java.io.FileOutputStream
-      - java.io.PrintWriter
-      - javax.script.ScriptEngine.eval
-      - java.lang.Class.forName
-      - java.io.ObjectInputStream
+      - java.io.FileReader
+      - java.io.FileWriter
+      - java.io.RandomAccessFile
+      - java.net.Socket
+      - java.net.ServerSocket
+      - java.net.URL
+      - java.net.URI
+      - java.sql.Statement.executeQuery
+      - java.sql.Statement.executeUpdate
+      - java.sql.Statement.execute
+      - java.sql.Connection.prepareStatement
+      - java.sql.Connection.prepareCall
+      - javax.persistence.EntityManager.createQuery
+      - javax.persistence.EntityManager.createNativeQuery
+      - org.hibernate.Session.createQuery
+      - org.hibernate.Session.createSQLQuery
+      - javax.servlet.http.HttpServletResponse.sendRedirect
+      - javax.servlet.http.HttpServletResponse.addHeader
+      - javax.servlet.http.HttpServletResponse.addCookie
+      - javax.servlet.RequestDispatcher.forward
+      - javax.servlet.RequestDispatcher.include
+      - java.util.logging.Logger.info
+      - java.util.logging.Logger.warning
+      - java.util.logging.Logger.severe
+      - java.util.logging.Logger.log
+      - org.apache.log4j.Logger.info
+      - org.apache.log4j.Logger.warn
+      - org.apache.log4j.Logger.error
+      - org.apache.log4j.Logger.fatal
+      - org.slf4j.Logger.info
+      - org.slf4j.Logger.warn
+      - org.slf4j.Logger.error
+      - org.slf4j.Logger.debug
+      - org.slf4j.Logger.trace
     javascript:
       - eval
+      - setTimeout
+      - setInterval
       - Function
-      - document.write
-      - document.writeln
-      - innerHTML
-      - outerHTML
-      - insertAdjacentHTML
-      - fs.writeFile
-      - fs.writeFileSync
       - child_process.exec
       - child_process.execSync
-      - require
+      - child_process.spawn
+      - child_process.spawnSync
+      - child_process.execFile
+      - child_process.execFileSync
+      - fs.writeFile
+      - fs.writeFileSync
+      - fs.appendFile
+      - fs.appendFileSync
+      - fs.createWriteStream
+      - fs.unlink
+      - fs.unlinkSync
+      - fs.rename
+      - fs.renameSync
+      - fs.chmod
+      - fs.chmodSync
+      - fs.chown
+      - fs.chownSync
+      - fs.rmdir
+      - fs.rmdirSync
+      - fs.mkdir
+      - fs.mkdirSync
+      - res.send
+      - res.json
+      - res.jsonp
+      - res.render
+      - res.redirect
+      - res.write
+      - res.end
+      - res.sendFile
+      - res.download
+      - res.set
+      - res.header
+      - res.cookie
+      - res.clearCookie
+      - res.attachment
+      - res.append
+      - res.location
+      - res.links
+      - res.type
+      - res.format
+      - res.vary
+      - res.status
+      - res.sendStatus
+      - document.write
+      - document.writeln
+      - document.body.innerHTML
+      - element.innerHTML
+      - element.outerHTML
+      - element.insertAdjacentHTML
+      - location.href
+      - location.replace
+      - location.assign
+      - window.open
     python:
       - eval
       - exec
-      - subprocess.call
-      - subprocess.run
-      - subprocess.Popen
       - os.system
       - os.popen
-      - os.exec
+      - os.spawn
+      - os.execl
+      - os.execle
+      - os.execlp
+      - os.execv
+      - os.execve
+      - os.execvp
+      - os.execvpe
+      - subprocess.call
+      - subprocess.check_call
+      - subprocess.check_output
+      - subprocess.Popen
+      - subprocess.run
       - pickle.load
       - pickle.loads
+      - cPickle.load
+      - cPickle.loads
       - yaml.load
-      - json.loads
+      - yaml.full_load
+      - sqlite3.execute
+      - sqlite3.executemany
+      - sqlite3.executescript
+      - psycopg2.execute
+      - psycopg2.executemany
+      - MySQLdb.execute
+      - MySQLdb.executemany
+      - pymysql.execute
+      - pymysql.executemany
+      - cx_Oracle.execute
+      - cx_Oracle.executemany
+      - sqlalchemy.execute
+      - django.db.connection.cursor().execute
+      - flask.render_template
+      - flask.render_template_string
+      - jinja2.Template
+      - jinja2.Environment
+      - mako.template.Template
+      - cheetah.template.Template
+      - logging.info
+      - logging.warning
+      - logging.error
+      - logging.critical
+      - logging.exception
+      - logging.log
+      - open
+      - file
+      - io.open
+      - codecs.open
     go:
-      - exec.Command
       - os/exec.Command
-      - sql.Query
-      - sql.Exec
+      - os/exec.CommandContext
+      - syscall.Exec
+      - syscall.ForkExec
+      - syscall.StartProcess
+      - os.StartProcess
+      - net/http.ResponseWriter.Write
+      - fmt.Printf
+      - fmt.Fprintf
+      - fmt.Sprintf
+      - fmt.Print
+      - fmt.Fprint
+      - fmt.Sprint
+      - fmt.Println
+      - fmt.Fprintln
+      - fmt.Sprintln
+      - log.Print
+      - log.Printf
+      - log.Println
+      - log.Fatal
+      - log.Fatalf
+      - log.Fatalln
+      - log.Panic
+      - log.Panicf
+      - log.Panicln
+      - database/sql.DB.Query
+      - database/sql.DB.QueryRow
+      - database/sql.DB.Exec
+      - database/sql.Tx.Query
+      - database/sql.Tx.QueryRow
+      - database/sql.Tx.Exec
+      - html/template.New
+      - html/template.ParseFiles
+      - html/template.ParseGlob
+      - text/template.New
+      - text/template.ParseFiles
+      - text/template.ParseGlob
+      - os.Open
       - os.OpenFile
-      - os.WriteFile
-      - html/template.HTML
-      - text/template.HTML
-      - os/exec.LookPath
-    kotlin:
-      - java.lang.Runtime.exec
-      - java.lang.ProcessBuilder
-      - java.sql.Statement.executeQuery
-      - java.io.FileWriter
-      - kotlin.io.print
-      - kotlin.io.println
-      - javax.script.ScriptEngine.eval
+      - os.Create
+      - io/ioutil.WriteFile
     csharp:
       - System.Diagnostics.Process.Start
-      - System.Data.SqlClient.SqlCommand
+      - System.Data.SqlClient.SqlCommand.ExecuteReader
+      - System.Data.SqlClient.SqlCommand.ExecuteNonQuery
+      - System.Data.SqlClient.SqlCommand.ExecuteScalar
+      - System.Data.OleDb.OleDbCommand.ExecuteReader
+      - System.Data.OleDb.OleDbCommand.ExecuteNonQuery
+      - System.Data.OleDb.OleDbCommand.ExecuteScalar
+      - System.Data.Odbc.OdbcCommand.ExecuteReader
+      - System.Data.Odbc.OdbcCommand.ExecuteNonQuery
+      - System.Data.Odbc.OdbcCommand.ExecuteScalar
+      - System.Data.OracleClient.OracleCommand.ExecuteReader
+      - System.Data.OracleClient.OracleCommand.ExecuteNonQuery
+      - System.Data.OracleClient.OracleCommand.ExecuteScalar
+      - Response.Write
+      - Response.WriteFile
+      - Response.TransmitFile
+      - Response.BinaryWrite
+      - Response.Redirect
       - System.IO.File.WriteAllText
       - System.IO.File.WriteAllLines
+      - System.IO.File.WriteAllBytes
+      - System.IO.File.AppendAllText
+      - System.IO.File.AppendAllLines
       - System.IO.StreamWriter.Write
-      - Microsoft.AspNetCore.Mvc.ContentResult
-      - System.Web.HttpResponse.Write
-      - System.Xml.XmlDocument.LoadXml
-    ghidra:
-      - execute
-      - run
-      - eval
-      - write
-      - createFile
-      - writeBytes
-    jimple:
-      - java.lang.Runtime.exec
-      - java.lang.ProcessBuilder
-      - java.sql.Statement.executeQuery
-      - java.io.FileWriter
-      - java.io.FileOutputStream
+      - System.IO.StreamWriter.WriteLine
+      - System.Console.Write
+      - System.Console.WriteLine
     php:
-      - eval
-      - system
       - exec
-      - shell_exec
       - passthru
+      - shell_exec
+      - system
+      - proc_open
+      - popen
+      - pcntl_exec
+      - eval
+      - assert
+      - preg_replace
+      - create_function
       - include
+      - include_once
       - require
-      - file_put_contents
-      - fwrite
+      - require_once
       - echo
       - print
       - printf
-    ruby:
-      - eval
-      - system
-      - exec
-      - backtick
-      - File.open
-      - IO.popen
-      - Kernel.open
-      - YAML.load
-      - JSON.parse
-      - ERB.new
-    swift:
-      - Process
-      - FileManager.createFile
-      - FileManager.write
-      - NSExpression
-      - NSPredicate
-      - NSString.stringWithFormat
-      - Data.write
-      - OutputStream.write
+      - vprintf
+      - file_put_contents
+      - fwrite
+      - fputs
+      - fopen
+      - unlink
+      - rmdir
+      - mkdir
+      - rename
+      - copy
+      - move_uploaded_file
+      - header
+      - setcookie
+      - setrawcookie
+      - mysql_query
+      - mysqli_query
+      - mysqli::query
+      - pg_query
+      - pg_execute
+      - mssql_query
+      - sqlite_query
+      - sqlite_exec
+      - PDO::query
+      - PDO::exec
+      - PDO::prepare
 
 query:
   timeout: ${QUERY_TIMEOUT:30}

@@ -33,6 +33,9 @@ def register_taint_analysis_tools(mcp, services: dict):
         such as user input, environment variables, or network data. Useful for
         identifying where external data enters the program.
 
+        The tool uses a comprehensive list of default sources configured in the
+        system configuration unless specific patterns are provided.
+
         Args:
             codebase_hash: The session ID from create_cpg_session
             language: Programming language to use for default patterns (e.g., "c", "java")
@@ -81,11 +84,7 @@ def register_taint_analysis_tools(mcp, services: dict):
 
             patterns = source_patterns or taint_cfg.get(lang, [])
             if not patterns:
-                # Fallback patterns matching config.yaml defaults for C
-                patterns = [
-                    "getenv", "fgets", "scanf", "read", "recv", "accept", 
-                    "fopen", "gets", "getchar", "fscanf", "fread", "recvfrom", "recvmsg"
-                ]
+                return {"success": True, "sources": [], "total": 0, "message": f"No taint sources configured for language {lang}"}
 
             # Build Joern query searching for call names matching any pattern
             # Remove trailing parens from patterns for proper regex matching
@@ -157,6 +156,9 @@ def register_taint_analysis_tools(mcp, services: dict):
         for data, such as system execution, file operations, or format strings.
         Useful for identifying where untrusted data could cause harm.
 
+        The tool uses a comprehensive list of default sinks configured in the
+        system configuration unless specific patterns are provided.
+
         Args:
             codebase_hash: The session ID from create_cpg_session
             language: Programming language to use for default patterns (e.g., "c", "java")
@@ -204,11 +206,7 @@ def register_taint_analysis_tools(mcp, services: dict):
 
             patterns = sink_patterns or taint_cfg.get(lang, [])
             if not patterns:
-                # Fallback patterns matching config.yaml defaults for C
-                patterns = [
-                    "system", "popen", "execl", "execv", "execve", "sprintf", "fprintf",
-                    "snprintf", "vsprintf", "vfprintf", "strcpy", "strcat", "gets"
-                ]
+                return {"success": True, "sinks": [], "total": 0, "message": f"No taint sinks configured for language {lang}"}
 
             # Remove trailing parens from patterns for proper regex matching
             cleaned_patterns = [p.rstrip("(") for p in patterns]
