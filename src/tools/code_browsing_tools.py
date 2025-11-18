@@ -435,8 +435,8 @@ def register_code_browsing_tools(mcp, services: dict):
         try:
             validate_codebase_hash(codebase_hash)
 
-            if depth < 1 and depth > 15:
-                raise ValidationError("Depth must be at least 1")
+            if depth < 1 or depth > 15:
+                raise ValidationError("Depth must be between 1 and 15")
 
             if direction not in ["outgoing", "incoming"]:
                 raise ValidationError("Direction must be 'outgoing' or 'incoming'")
@@ -449,34 +449,163 @@ def register_code_browsing_tools(mcp, services: dict):
             if not codebase_info or not codebase_info.cpg_path:
                 raise ValidationError(f"CPG not found for codebase {codebase_hash}. Generate it first using generate_cpg.")
 
-            # Build query based on direction
-            # Escape the method name for regex matching
-            method_escaped = method_name.replace("\\", "\\\\").replace("\"", "\\\"")
+            # Build improved CPGQL query with proper structure
+            query_template = r'''{
+  def escapeJson(s: String): String = {
+    s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
+  }
 
-            if direction == "outgoing":
-                # Simpler one-liner approach for outgoing calls (what method calls)
-                # For depth 1: direct callees
-                # For depth 2: direct callees + their callees (avoiding cycles)
-                if depth == 1:
-                    query = (
-                        f'cpg.method.name("{method_escaped}").headOption.map(m => '
-                        f'm.call.callee.filterNot(_.name.startsWith("<operator>")).map(c => (m.name, c.name, 1)).l).getOrElse(List()).toJsonPretty'
-                    )
-                else:
-                    # For depth > 1, use inline BFS with braces to ensure proper parsing
-                    query = f'{{ val rootMethod = cpg.method.name("{method_escaped}").l; if (rootMethod.nonEmpty) {{ val rootName = rootMethod.head.name; var allCalls = scala.collection.mutable.ListBuffer[(String, String, Int)](); var toVisit = scala.collection.mutable.Queue[(io.shiftleft.codepropertygraph.generated.nodes.Method, Int)](); var visited = Set[String](); toVisit.enqueue((rootMethod.head, 0)); while (toVisit.nonEmpty) {{ val (current, currentDepth) = toVisit.dequeue(); val currentName = current.name; if (!visited.contains(currentName) && currentDepth < {depth}) {{ visited = visited + currentName; val callees = current.call.callee.l; for (callee <- callees) {{ val calleeName = callee.name; if (!calleeName.startsWith("<operator>")) {{ allCalls += ((currentName, calleeName, currentDepth + 1)); if (!visited.contains(calleeName)) {{ toVisit.enqueue((callee, currentDepth + 1)) }} }} }} }} }}; allCalls.toList }} else List[(String, String, Int)]() }}.toJsonPretty'
-            else:  # incoming
-                # Simpler one-liner approach for incoming calls (what calls this method)
-                # For depth 1: direct callers
-                # For depth 2: direct callers + their callers (avoiding cycles)
-                if depth == 1:
-                    query = (
-                        f'cpg.method.name("{method_escaped}").headOption.map(m => '
-                        f'm.caller.filterNot(_.name.startsWith("<operator>")).map(c => (c.name, m.name, 1)).l).getOrElse(List()).toJsonPretty'
-                    )
-                else:
-                    # For depth > 1, use inline BFS with braces to ensure proper parsing
-                    query = f'{{ val targetMethod = cpg.method.name("{method_escaped}").l; if (targetMethod.nonEmpty) {{ val targetName = targetMethod.head.name; var allCallers = scala.collection.mutable.ListBuffer[(String, String, Int)](); var toVisit = scala.collection.mutable.Queue[(io.shiftleft.codepropertygraph.generated.nodes.Method, Int)](); var visited = Set[String](); val directCallers = targetMethod.head.caller.l; for (caller <- directCallers) {{ allCallers += ((caller.name, targetName, 1)); toVisit.enqueue((caller, 1)) }}; while (toVisit.nonEmpty) {{ val (current, currentDepth) = toVisit.dequeue(); val currentName = current.name; if (!visited.contains(currentName) && currentDepth < {depth}) {{ visited = visited + currentName; val incomingCallers = current.caller.l; for (caller <- incomingCallers) {{ val callerName = caller.name; if (!callerName.startsWith("<operator>")) {{ allCallers += ((callerName, targetName, currentDepth + 1)); if (!visited.contains(callerName)) {{ toVisit.enqueue((caller, currentDepth + 1)) }} }} }} }} }}; allCallers.toList }} else List[(String, String, Int)]() }}.toJsonPretty'
+  val methodName = "METHOD_NAME_PLACEHOLDER"
+  val maxDepth = DEPTH_PLACEHOLDER
+  val direction = "DIRECTION_PLACEHOLDER"
+  val maxResults = 500
+
+  val rootMethodOpt = cpg.method.name(methodName).headOption
+
+  val result = rootMethodOpt match {
+    case Some(rootMethod) => {
+      val rootName = rootMethod.name
+      val allCalls = scala.collection.mutable.ListBuffer[Map[String, Any]]()
+      
+      if (direction == "outgoing") {
+        var toVisit = scala.collection.mutable.Queue[(io.shiftleft.codepropertygraph.generated.nodes.Method, Int)]()
+        var visited = Set[String]()
+        var edgesVisited = Set[(String, String, Int)]()
+        
+        toVisit.enqueue((rootMethod, 0))
+        
+        while (toVisit.nonEmpty && allCalls.size < maxResults) {
+          val (current, currentDepth) = toVisit.dequeue()
+          val currentName = current.name
+          
+          if (!visited.contains(currentName) && currentDepth < maxDepth) {
+            visited = visited + currentName
+            
+            val callees = current.call.callee.l
+              .filterNot(_.name.startsWith("<operator>"))
+              .take(50)
+            
+            for (callee <- callees) {
+              val calleeName = callee.name
+              val edgeKey = (currentName, calleeName, currentDepth + 1)
+              
+              if (!edgesVisited.contains(edgeKey)) {
+                edgesVisited = edgesVisited + edgeKey
+                allCalls += Map(
+                  "from" -> currentName,
+                  "to" -> escapeJson(calleeName),
+                  "depth" -> (currentDepth + 1)
+                )
+                
+                if (!visited.contains(calleeName) && currentDepth + 1 < maxDepth) {
+                  toVisit.enqueue((callee, currentDepth + 1))
+                }
+              }
+            }
+          }
+        }
+        
+        List(
+          Map(
+            "success" -> true,
+            "root_method" -> rootName,
+            "direction" -> direction,
+            "calls" -> allCalls.toList.sortBy(c => (c.getOrElse("depth", 0).asInstanceOf[Int], c.getOrElse("from", "").asInstanceOf[String])),
+            "total" -> allCalls.size
+          )
+        )
+      } else if (direction == "incoming") {
+        var toVisit = scala.collection.mutable.Queue[(io.shiftleft.codepropertygraph.generated.nodes.Method, Int)]()
+        var visited = Set[String]()
+        var edgesVisited = Set[(String, String, Int)]()
+        
+        val directCallers = rootMethod.caller.l.filterNot(_.name.startsWith("<operator>"))
+        for (caller <- directCallers) {
+          val edgeKey = (caller.name, rootName, 1)
+          if (!edgesVisited.contains(edgeKey)) {
+            edgesVisited = edgesVisited + edgeKey
+            allCalls += Map(
+              "from" -> escapeJson(caller.name),
+              "to" -> rootName,
+              "depth" -> 1
+            )
+            toVisit.enqueue((caller, 1))
+          }
+        }
+        
+        visited = visited + rootName
+        
+        while (toVisit.nonEmpty && allCalls.size < maxResults) {
+          val (current, currentDepth) = toVisit.dequeue()
+          val currentName = current.name
+          
+          if (!visited.contains(currentName) && currentDepth < maxDepth) {
+            visited = visited + currentName
+            
+            val incomingCallers = current.caller.l
+              .filterNot(_.name.startsWith("<operator>"))
+              .take(50)
+            
+            for (caller <- incomingCallers) {
+              val callerName = caller.name
+              val edgeKey = (callerName, rootName, currentDepth + 1)
+              
+              if (!edgesVisited.contains(edgeKey)) {
+                edgesVisited = edgesVisited + edgeKey
+                allCalls += Map(
+                  "from" -> escapeJson(callerName),
+                  "to" -> rootName,
+                  "depth" -> (currentDepth + 1)
+                )
+                
+                if (!visited.contains(callerName) && currentDepth + 1 < maxDepth) {
+                  toVisit.enqueue((caller, currentDepth + 1))
+                }
+              }
+            }
+          }
+        }
+        
+        List(
+          Map(
+            "success" -> true,
+            "root_method" -> rootName,
+            "direction" -> direction,
+            "calls" -> allCalls.toList.sortBy(c => (c.getOrElse("depth", 0).asInstanceOf[Int], c.getOrElse("from", "").asInstanceOf[String])),
+            "total" -> allCalls.size
+          )
+        )
+      } else {
+        List(
+          Map(
+            "success" -> false,
+            "error" -> Map(
+              "code" -> "INVALID_DIRECTION",
+              "message" -> s"Direction must be 'outgoing' or 'incoming', got: '$direction'"
+            )
+          )
+        )
+      }
+    }
+    case None => {
+      List(
+        Map(
+          "success" -> false,
+          "error" -> Map(
+            "code" -> "METHOD_NOT_FOUND",
+            "message" -> s"Method not found: $methodName"
+          )
+        )
+      )
+    }
+  }
+
+  result.toJsonPretty
+}'''
+
+            query = query_template.replace("METHOD_NAME_PLACEHOLDER", method_name)
+            query = query.replace("DEPTH_PLACEHOLDER", str(depth))
+            query = query.replace("DIRECTION_PLACEHOLDER", direction)
 
             result = query_executor.execute_query(
                 codebase_hash=codebase_hash,
@@ -492,24 +621,37 @@ def register_code_browsing_tools(mcp, services: dict):
                     "error": {"code": "QUERY_ERROR", "message": result.error},
                 }
 
-            calls = []
-            for item in result.data:
-                if isinstance(item, dict):
-                    calls.append(
-                        {
-                            "from": item.get("_1", ""),
-                            "to": item.get("_2", ""),
-                            "depth": item.get("_3", 1),
-                        }
-                    )
+            # Parse the JSON result
+            import json
 
-            return {
-                "success": True,
-                "root_method": method_name,
-                "direction": direction,
-                "calls": calls,
-                "total": len(calls),
-            }
+            if isinstance(result.data, list) and len(result.data) > 0:
+                result_data = result.data[0]
+
+                # Handle JSON string response
+                if isinstance(result_data, str):
+                    result_obj = json.loads(result_data)
+                else:
+                    result_obj = result_data
+
+                # Extract calls and ensure proper structure
+                if result_obj.get("success"):
+                    return {
+                        "success": True,
+                        "root_method": result_obj.get("root_method", method_name),
+                        "direction": result_obj.get("direction", direction),
+                        "calls": result_obj.get("calls", []),
+                        "total": result_obj.get("total", 0),
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "error": result_obj.get("error", {"code": "UNKNOWN", "message": "Unknown error"}),
+                    }
+            else:
+                return {
+                    "success": False,
+                    "error": {"code": "NO_RESULT", "message": "Query returned no results"},
+                }
 
         except (ValidationError, ValidationError, ValidationError) as e:
             logger.error(f"Error getting call graph: {e}")
