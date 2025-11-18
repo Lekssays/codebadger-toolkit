@@ -836,6 +836,10 @@ def register_taint_analysis_tools(mcp, services: dict):
     s.replace("\\\\", "\\\\\\\\").replace("\\"", "\\\\\\"").replace("\\n", "\\\\n").replace("\\r", "\\\\r").replace("\\t", "\\\\t")
   }}
   
+  def normalizeFilename(path: String, filename: String): Boolean = {{
+    path.endsWith("/" + filename) || path == filename
+  }}
+  
   val filename = "{filename}"
   val lineNum = {line_num}
   val useNodeId = {str(node_id is not None).lower()}
@@ -843,62 +847,84 @@ def register_taint_analysis_tools(mcp, services: dict):
   val callName = "{call_name if call_name else ""}"
   val includeDataflow = {str(include_dataflow).lower()}
   val includeControlFlow = {str(include_control_flow).lower()}
+  val maxDepth = {max_depth}
   
-  val targetMethodOpt = if (useNodeId) {{
+  // Find target method
+  val targetMethodOpt = if (useNodeId && nodeId.nonEmpty) {{
     cpg.call.id(nodeId.toLong).method.headOption
   }} else {{
-    cpg.method.filter(m => {{
-      val f = m.file.name.headOption.getOrElse("")
-      (f.endsWith("/" + filename) || f == filename)
-    }}).filter(m => {{
-      val start = m.lineNumber.getOrElse(-1)
-      val end = m.lineNumberEnd.getOrElse(-1)
-      start <= lineNum && end >= lineNum
-    }}).headOption
+    cpg.method
+      .filter(m => normalizeFilename(m.file.name.headOption.getOrElse(""), filename))
+      .filter(m => {{
+        val start = m.lineNumber.getOrElse(-1)
+        val end = m.lineNumberEnd.getOrElse(-1)
+        start <= lineNum && end >= lineNum
+      }})
+      .headOption
   }}
   
+  // Process result
   targetMethodOpt match {{
     case Some(method) => {{
-      val targetCallOpt = if (useNodeId) {{
+      // Find target call
+      val targetCallOpt = if (useNodeId && nodeId.nonEmpty) {{
         cpg.call.id(nodeId.toLong).headOption
       }} else {{
-        val calls = method.call.l.filter(c => c.lineNumber.getOrElse(-1) == lineNum)
-        if (callName != "" && calls.nonEmpty) calls.filter(_.name == callName).headOption else calls.headOption
+        val callsOnLine = method.call.filter(c => c.lineNumber.getOrElse(-1) == lineNum).l
+        if (callName.nonEmpty && callsOnLine.nonEmpty) {{
+          callsOnLine.filter(_.name == callName).headOption
+        }} else if (callsOnLine.nonEmpty) {{
+          callsOnLine.headOption
+        }} else {{
+          None
+        }}
       }}
       
       targetCallOpt match {{
         case Some(targetCall) => {{
+          // Collect dataflow information
           val dataflow = if (includeDataflow) {{
             val argVars = targetCall.argument.code.l
-            val assignments = method.assignment.l.filter(assign => {{
-              val line = assign.lineNumber.getOrElse(-1)
-              line < lineNum
-            }}).filter(assign => {{
-              val targetCode = assign.target.code
-              argVars.exists(arg => arg.contains(targetCode) || targetCode.contains(arg))
-            }}).map(assign => Map(
-              "variable" -> assign.target.code,
-              "code" -> escapeJson(assign.code),
-              "filename" -> escapeJson(assign.file.name.headOption.getOrElse("unknown")),
-              "lineNumber" -> assign.lineNumber.getOrElse(-1),
-              "method" -> escapeJson(assign.method.fullName)
-            )).l
-            assignments
-          }} else List()
+            method.assignment
+              .filter(assign => assign.lineNumber.getOrElse(-1) < lineNum)
+              .filter(assign => {{
+                val targetCode = assign.target.code
+                argVars.exists(arg => arg.contains(targetCode.trim) || targetCode.contains(arg.trim))
+              }})
+              .map(assign => Map(
+                "variable" -> assign.target.code,
+                "code" -> escapeJson(assign.code),
+                "filename" -> escapeJson(assign.file.name.headOption.getOrElse("unknown")),
+                "lineNumber" -> assign.lineNumber.getOrElse(-1),
+                "method" -> escapeJson(assign.method.fullName)
+              ))
+              .l
+              .take(100)
+          }} else {{
+            List()
+          }}
           
+          // Collect control flow information
           val controlDeps = if (includeControlFlow) {{
-            val conditions = method.ast.isControlStructure.l.filter(ctrl => {{
-              val ctrlLine = ctrl.lineNumber.getOrElse(-1)
-              ctrlLine < lineNum && ctrlLine >= 0
-            }}).map(ctrl => Map(
-              "code" -> escapeJson(ctrl.code),
-              "filename" -> escapeJson(ctrl.file.name.headOption.getOrElse("unknown")),
-              "lineNumber" -> ctrl.lineNumber.getOrElse(-1),
-              "method" -> escapeJson(ctrl.method.fullName)
-            )).l
-            conditions
-          }} else List()
+            method.ast
+              .isControlStructure
+              .filter(ctrl => {{
+                val ctrlLine = ctrl.lineNumber.getOrElse(-1)
+                ctrlLine < lineNum && ctrlLine >= 0
+              }})
+              .map(ctrl => Map(
+                "code" -> escapeJson(ctrl.code),
+                "filename" -> escapeJson(ctrl.file.name.headOption.getOrElse("unknown")),
+                "lineNumber" -> ctrl.lineNumber.getOrElse(-1),
+                "method" -> escapeJson(ctrl.method.fullName)
+              ))
+              .l
+              .take(50)
+          }} else {{
+            List()
+          }}
           
+          // Build target call map
           val targetCallMap = Map(
             "node_id" -> targetCall.id.toString,
             "name" -> targetCall.name,
@@ -909,6 +935,7 @@ def register_taint_analysis_tools(mcp, services: dict):
             "arguments" -> targetCall.argument.code.l
           )
           
+          // Build success response
           Map(
             "success" -> true,
             "slice" -> Map(
@@ -976,7 +1003,7 @@ def register_taint_analysis_tools(mcp, services: dict):
                     },
                 }
 
-        except (ValidationError, ValidationError, ValidationError) as e:
+        except ValidationError as e:
             logger.error(f"Error getting program slice: {e}")
             return {
                 "success": False,
