@@ -3,6 +3,7 @@ Services package for CodeBadger Toolkit
 """
 
 from .codebase_tracker import CodebaseTracker
+from .code_browsing_service import CodeBrowsingService
 from .cpg_generator import CPGGenerator
 from .git_manager import GitManager
 from .joern_client import JoernServerClient
@@ -12,6 +13,7 @@ from .query_executor import QueryExecutor
 
 __all__ = [
     "CodebaseTracker",
+    "CodeBrowsingService",
     "GitManager",
     "CPGGenerator",
     "JoernServerClient",

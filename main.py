@@ -22,7 +22,8 @@ from src.services import (
     JoernServerClient,
     JoernServerManager,
     PortManager,
-    QueryExecutor
+    QueryExecutor,
+    CodeBrowsingService
 )
 from src.utils import DBManager, setup_logging
 from src.tools import register_tools
@@ -86,6 +87,13 @@ async def lifespan(mcp: FastMCP):
         # Initialize query executor with Joern server manager
         services['query_executor'] = QueryExecutor(services['joern_server_manager'], config=config.query)
         
+        # Initialize Code Browsing Service
+        services['code_browsing_service'] = CodeBrowsingService(
+            services['codebase_tracker'],
+            services['query_executor'],
+            services['db_manager']
+        )
+        
         # Register MCP tools now that services are initialized
         register_tools(mcp, services)
         
@@ -98,8 +106,8 @@ async def lifespan(mcp: FastMCP):
         logger.info("Shutting down CodeBadger Toolkit Server")
         
         # Close connections
-        await redis_client.close()
-        sync_redis_client.close()
+        # await redis_client.close()
+        # sync_redis_client.close()
         
         logger.info("CodeBadger Toolkit Server shutdown complete")
         

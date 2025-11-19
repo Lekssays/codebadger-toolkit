@@ -150,6 +150,17 @@ async def _generate_cpg_async(
         )
         
         logger.info(f"CPG generation complete for {codebase_hash}, port: {joern_port}")
+
+        # Trigger cache warm-up
+        if "code_browsing_service" in services:
+            logger.info(f"Starting cache warm-up for {codebase_hash}")
+            try:
+                import asyncio
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(None, services["code_browsing_service"].warm_up_cache, codebase_hash)
+                logger.info(f"Cache warm-up complete for {codebase_hash}")
+            except Exception as e:
+                logger.error(f"Cache warm-up failed for {codebase_hash}: {e}")
         
     except Exception as e:
         logger.error(f"Error in async CPG generation for {codebase_hash}: {e}", exc_info=True)
