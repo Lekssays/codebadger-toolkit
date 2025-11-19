@@ -106,8 +106,6 @@ async def lifespan(mcp: FastMCP):
         logger.info("Shutting down CodeBadger Toolkit Server")
         
         # Close connections
-        # await redis_client.close()
-        # sync_redis_client.close()
         
         logger.info("CodeBadger Toolkit Server shutdown complete")
         

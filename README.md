@@ -31,7 +31,7 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 2. Start the Docker Services (Joern + Redis)
+### 2. Start the Docker Services (Joern)
 
 ```bash
 docker compose up -d
@@ -39,7 +39,6 @@ docker compose up -d
 
 This starts:
 - **Joern Server**: Static code analysis engine (runs CPG generation and queries)
-- **Redis**: Metadata storage (tracks codebases, ports, and CPG information)
 
 Verify services are running:
 
@@ -50,8 +49,10 @@ docker compose ps
 ### 3. Start the MCP Server
 
 ```bash
-# Set the correct Redis port (maps to container's 6379)
-REDIS_PORT=6380 python main.py
+```bash
+# Start the server
+python main.py &
+```
 ```
 
 The MCP server will be available at `http://localhost:4242`.
@@ -194,7 +195,7 @@ pytest tests/ -q
 
 ```bash
 # Start MCP server in background
-REDIS_PORT=6380 python main.py &
+python main.py &
 
 # Run integration tests
 pytest tests/integration -q
@@ -239,10 +240,6 @@ Key settings (optional - defaults shown):
 MCP_HOST=0.0.0.0
 MCP_PORT=4242
 
-# Redis (running inside Docker container)
-REDIS_HOST=localhost
-REDIS_PORT=6380        # ⚠️  IMPORTANT: Port 6380 on host maps to 6379 in container
-
 # Joern
 JOERN_BINARY_PATH=joern
 JOERN_JAVA_OPTS="-Xmx4G -Xms2G -XX:+UseG1GC -Dfile.encoding=UTF-8"
@@ -267,18 +264,6 @@ cp config.example.yaml config.yaml
 
 Then customize as needed.
 
-### Important: Redis Port Configuration
 
-Since Redis runs inside the Docker container:
-
-- **Inside container**: Redis listens on `6379`
-- **Host mapping**: Docker maps `6380:6379`
-- **MCP server should use**: `REDIS_PORT=6380`
-
-Always start the MCP server with:
-
-```bash
-REDIS_PORT=6380 python main.py
-```
 
 

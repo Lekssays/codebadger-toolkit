@@ -66,12 +66,23 @@ def mock_services():
     # Mock config
     config = Config()
 
+    # Mock code browsing service
+    code_browsing_service = MagicMock()
+    code_browsing_service.list_methods.return_value = {"success": True, "methods": []}
+    code_browsing_service.run_query.return_value = {"success": True, "data": [], "row_count": 0}
+
+    # Mock joern server manager
+    joern_server_manager = MagicMock()
+    joern_server_manager.get_server_port.return_value = 8080
+
     return {
         "git_manager": git_manager,
         "cpg_generator": cpg_generator,
         "codebase_tracker": codebase_tracker,
         "query_executor": query_executor,
         "config": config,
+        "code_browsing_service": code_browsing_service,
+        "joern_server_manager": joern_server_manager,
     }
 
 
@@ -244,31 +255,43 @@ class TestMCPTools:
         func = mcp.registered.get("run_cpgql_query")
         assert func is not None
 
-        result = func(codebase_hash="553642871dd4251d", query="cpg.method")
+        with patch("src.services.joern_client.JoernServerClient") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.execute_query.return_value = {
+                "success": True,
+                "stdout": '["result"]',
+                "stderr": ""
+            }
+            mock_client_class.return_value = mock_client
 
-        assert result["success"] is True
-        assert "data" in result
-        assert "row_count" in result
+            result = func(codebase_hash="553642871dd4251d", query="cpg.method")
+
+            assert result["success"] is True
+            assert result["stdout"] == '["result"]'
 
     def test_run_cpgql_query_invalid(self, mock_services):
         """Test running invalid CPGQL query"""
         from src.tools.code_browsing_tools import register_code_browsing_tools
         
-        mock_services["query_executor"].execute_query.return_value = QueryResult(
-            success=False,
-            error="Invalid query syntax"
-        )
-
         mcp = FakeMCP()
         register_code_browsing_tools(mcp, mock_services)
 
         func = mcp.registered.get("run_cpgql_query")
         assert func is not None
 
-        result = func(codebase_hash="553642871dd4251d", query="invalid query")
+        with patch("src.services.joern_client.JoernServerClient") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.execute_query.return_value = {
+                "success": False,
+                "stdout": "",
+                "stderr": "Invalid query syntax"
+            }
+            mock_client_class.return_value = mock_client
 
-        assert result["success"] is False
-        assert "error" in result
+            result = func(codebase_hash="553642871dd4251d", query="invalid query")
+
+            assert result["success"] is False
+            assert result["stderr"] == "Invalid query syntax"
 
     def test_get_codebase_summary_success(self, mock_services):
         """Test getting codebase summary successfully"""

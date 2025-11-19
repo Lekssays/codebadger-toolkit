@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  # Joern server with Redis (container)
+  # Joern server (container)
   codebadger-joern-server:
     build:
       context: .
@@ -9,17 +9,10 @@ services:
     image: codebadger-joern-server:latest
     container_name: codebadger-joern-server
     ports:
-      - "6380:6379"
       # Expose ports 2000-2999 for Joern servers
       - "2000-2999:2000-2999"
     volumes:
       # Mount playground for CPG storage (shared with host)
       - ./playground:/playground
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
 

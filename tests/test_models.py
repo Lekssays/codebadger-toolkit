@@ -12,7 +12,6 @@ from src.models import (
     JoernConfig,
     QueryConfig,
     QueryResult,
-    RedisConfig,
     ServerConfig,
     SessionStatus,
     SourceType,
@@ -84,16 +83,6 @@ class TestConfigModels:
         assert config.port == 8080
         assert config.log_level == "DEBUG"
 
-    def test_redis_config(self):
-        """Test RedisConfig creation"""
-        config = RedisConfig(host="localhost", port=6379, password="secret", db=1)
-
-        assert config.host == "localhost"
-        assert config.port == 6379
-        assert config.password == "secret"
-        assert config.db == 1
-        assert config.decode_responses is True
-
     def test_cpg_config(self):
         """Test CPGConfig creation"""
         config = CPGConfig(
@@ -133,7 +122,6 @@ class TestConfigModels:
         """Test Config composition"""
         config = Config(
             server=ServerConfig(host="0.0.0.0", port=4242),
-            redis=RedisConfig(host="redis", port=6379),
             joern=JoernConfig(binary_path="joern"),
             cpg=CPGConfig(generation_timeout=600),
             query=QueryConfig(timeout=30),
@@ -141,7 +129,6 @@ class TestConfigModels:
         )
 
         assert config.server.host == "0.0.0.0"
-        assert config.redis.host == "redis"
         assert config.joern.binary_path == "joern"
         assert config.cpg.generation_timeout == 600
         assert config.query.timeout == 30

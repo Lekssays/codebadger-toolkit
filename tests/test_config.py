@@ -19,12 +19,6 @@ class TestLoadConfig:
         """Test loading config from YAML file"""
         config_data = {
             "server": {"host": "127.0.0.1", "port": 8080, "log_level": "DEBUG"},
-            "redis": {
-                "host": "redis-server",
-                "port": 6379,
-                "password": "secret",
-                "db": 1,
-            },
         }
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -37,10 +31,6 @@ class TestLoadConfig:
             assert config.server.host == "127.0.0.1"
             assert config.server.port == 8080
             assert config.server.log_level == "DEBUG"
-            assert config.redis.host == "redis-server"
-            assert config.redis.port == 6379
-            assert config.redis.password == "secret"
-            assert config.redis.db == 1
         finally:
             os.unlink(config_path)
 
@@ -50,10 +40,6 @@ class TestLoadConfig:
             "MCP_HOST": "0.0.0.0",
             "MCP_PORT": "4242",
             "MCP_LOG_LEVEL": "INFO",
-            "REDIS_HOST": "localhost",
-            "REDIS_PORT": "6379",
-            "REDIS_PASSWORD": "testpass",
-            "REDIS_DB": "2",
             "JOERN_BINARY_PATH": "/usr/bin/joern",
             "JOERN_MEMORY_LIMIT": "4g",
             "CPG_GENERATION_TIMEOUT": "1200",
@@ -71,10 +57,6 @@ class TestLoadConfig:
             assert config.server.host == "0.0.0.0"
             assert config.server.port == 4242
             assert config.server.log_level == "INFO"
-            assert config.redis.host == "localhost"
-            assert config.redis.port == 6379
-            assert config.redis.password == "testpass"
-            assert config.redis.db == 2
             assert config.joern.binary_path == "/usr/bin/joern"
             assert config.joern.memory_limit == "4g"
             assert config.cpg.generation_timeout == 1200
@@ -94,10 +76,6 @@ class TestLoadConfig:
             assert config.server.host == "0.0.0.0"
             assert config.server.port == 4242
             assert config.server.log_level == "INFO"
-            assert config.redis.host == "localhost"
-            assert config.redis.port == 6380
-            assert config.redis.password is None
-            assert config.redis.db == 0
             assert config.joern.binary_path == "joern"
             assert config.joern.memory_limit == "4g"
             assert config.cpg.generation_timeout == 600
@@ -170,12 +148,6 @@ class TestDictToConfig:
         """Test converting full config dictionary"""
         data = {
             "server": {"host": "127.0.0.1", "port": 8080, "log_level": "DEBUG"},
-            "redis": {
-                "host": "redis-server",
-                "port": 6379,
-                "password": "secret",
-                "db": 1,
-            },
             "joern": {"binary_path": "/usr/bin/joern", "memory_limit": "8g"},
             "cpg": {"generation_timeout": 1200, "max_repo_size_mb": 1000},
             "query": {"timeout": 60, "cache_enabled": False, "cache_ttl": 600},
@@ -187,10 +159,6 @@ class TestDictToConfig:
         assert config.server.host == "127.0.0.1"
         assert config.server.port == 8080
         assert config.server.log_level == "DEBUG"
-        assert config.redis.host == "redis-server"
-        assert config.redis.port == 6379
-        assert config.redis.password == "secret"
-        assert config.redis.db == 1
         assert config.joern.binary_path == "/usr/bin/joern"
         assert config.joern.memory_limit == "8g"
         assert config.cpg.generation_timeout == 1200
@@ -203,20 +171,16 @@ class TestDictToConfig:
 
     def test_dict_to_config_partial(self):
         """Test converting partial config dictionary"""
-        data = {"server": {"port": 9000}, "redis": {"host": "custom-redis"}}
+        data = {"server": {"port": 9000}}
 
         config = _dict_to_config(data)
 
         # Specified values
         assert config.server.port == 9000
-        assert config.redis.host == "custom-redis"
 
         # Default values
         assert config.server.host == "0.0.0.0"
         assert config.server.log_level == "INFO"
-        assert config.redis.port == 6379
-        assert config.redis.password is None
-        assert config.redis.db == 0
 
     def test_dict_to_config_empty(self):
         """Test converting empty config dictionary"""
@@ -225,18 +189,11 @@ class TestDictToConfig:
         # All default values
         assert config.server.host == "0.0.0.0"
         assert config.server.port == 4242
-        assert config.redis.host == "localhost"
-        assert config.redis.port == 6379
 
     def test_dict_to_config_type_conversions(self):
         """Test type conversions in config"""
         data = {
             "server": {"port": "9000", "log_level": "INFO"},  # String to int
-            "redis": {
-                "port": "6380",  # String to int
-                "db": "2",  # String to int
-                "decode_responses": "false",  # String to bool
-            },
             "query": {
                 "cache_enabled": "true",  # String to bool
                 "timeout": "45",  # String to int
@@ -247,9 +204,6 @@ class TestDictToConfig:
         config = _dict_to_config(data)
 
         assert config.server.port == 9000
-        assert config.redis.port == 6380
-        assert config.redis.db == 2
-        assert config.redis.decode_responses is False
         assert config.query.cache_enabled is True
         assert config.query.timeout == 45
         assert config.storage.cleanup_on_shutdown is False

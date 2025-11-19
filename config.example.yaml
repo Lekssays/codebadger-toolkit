@@ -3,12 +3,6 @@ server:
   port: ${MCP_PORT:4242}
   log_level: ${MCP_LOG_LEVEL:INFO}
 
-redis:
-  host: ${REDIS_HOST:localhost}
-  port: ${REDIS_PORT:6380}
-  password: ${REDIS_PASSWORD:}
-  db: ${REDIS_DB:0}
-
 joern:
   binary_path: ${JOERN_BINARY_PATH:joern}
   memory_limit: ${JOERN_MEMORY_LIMIT:4g}

@@ -4,6 +4,7 @@ Core MCP Tools for CodeBadger Toolkit Server - Simplified hash-based version
 Provides core CPG management functionality
 """
 
+import docker
 import hashlib
 import io
 import logging
@@ -77,7 +78,6 @@ async def _generate_cpg_async(
         joern_server_manager = services.get("joern_server_manager")
         
         # Use Docker API to generate CPG inside container
-        import docker
         docker_client = docker.from_env()
         container = docker_client.containers.get("codebadger-joern-server")
         
@@ -137,7 +137,7 @@ async def _generate_cpg_async(
             except Exception as e:
                 logger.error(f"Failed to start Joern server: {e}", exc_info=True)
         
-        # Update Redis with final metadata (preserving container paths)
+        # Update DB with final metadata (preserving container paths)
         codebase_tracker.update_codebase(
             codebase_hash=codebase_hash,
             cpg_path=cpg_path,
@@ -235,30 +235,41 @@ def register_core_tools(mcp, services: dict):
             codebase_hash = get_cpg_cache_key(source_type, source_path, language)
             logger.info(f"Processing codebase with hash: {codebase_hash}")
 
-            # Check if codebase already exists in Redis
+            # Check if codebase already exists in DB
             existing_codebase = codebase_tracker.get_codebase(codebase_hash)
             if existing_codebase and existing_codebase.cpg_path and os.path.exists(existing_codebase.cpg_path):
-                logger.info(f"Found existing codebase in Redis: {codebase_hash}")
+                logger.info(f"Found existing codebase in DB: {codebase_hash}")
                 
                 # Check if Joern server is still running
                 joern_server_manager = services.get("joern_server_manager")
                 joern_port = existing_codebase.joern_port
                 
-                if joern_server_manager and joern_port:
-                    if not joern_server_manager.is_server_running(codebase_hash):
-                        logger.info(f"Joern server not running for {codebase_hash}, restarting...")
+                if joern_server_manager:
+                    # If we have a port recorded, check if it's actually running
+                    if joern_port and not joern_server_manager.is_server_running(codebase_hash):
+                        logger.info(f"Joern server recorded on port {joern_port} but not running for {codebase_hash}")
+                        joern_port = None # Reset port since it's not running
+                    
+                    # If not running (or wasn't running), start it
+                    if not joern_port:
+                        logger.info(f"Starting Joern server for existing codebase {codebase_hash}")
                         try:
-                            # Restart server and load CPG
+                            # Start server
                             joern_port = joern_server_manager.spawn_server(codebase_hash)
-                            cpg_path = existing_codebase.cpg_path
+                            
+                            # Load CPG
                             container_cpg_path = existing_codebase.metadata.get("container_cpg_path")
-                            if container_cpg_path:
-                                joern_server_manager.load_cpg(codebase_hash, container_cpg_path)
-                            # Update port in Redis
+                            if not container_cpg_path:
+                                # Fallback if not in metadata
+                                container_cpg_path = f"/playground/cpgs/{codebase_hash}/cpg.bin"
+                                
+                            joern_server_manager.load_cpg(codebase_hash, container_cpg_path)
+                            
+                            # Update port in DB
                             codebase_tracker.update_codebase(codebase_hash, joern_port=joern_port)
-                            logger.info(f"Joern server restarted on port {joern_port}")
+                            logger.info(f"Joern server started on port {joern_port}")
                         except Exception as e:
-                            logger.warning(f"Failed to restart Joern server: {e}")
+                            logger.warning(f"Failed to start Joern server: {e}")
                 
                 return {
                     "codebase_hash": codebase_hash,
@@ -333,7 +344,7 @@ def register_core_tools(mcp, services: dict):
             os.makedirs(cpg_dir, exist_ok=True)
             logger.info(f"CPG directory ready: {cpg_dir}")
 
-            # Step 5: Store initial metadata in Redis (before CPG generation)
+            # Step 5: Store initial metadata in DB (before CPG generation)
             codebase_tracker.save_codebase(
                 codebase_hash=codebase_hash,
                 source_type=source_type,
@@ -408,7 +419,7 @@ def register_core_tools(mcp, services: dict):
         try:
             codebase_tracker = services["codebase_tracker"]
             
-            # Step 6: If codebase exists in Redis, return metadata
+            # Step 6: If codebase exists in DB, return metadata
             codebase_info = codebase_tracker.get_codebase(codebase_hash)
             
             if not codebase_info:
@@ -423,11 +434,41 @@ def register_core_tools(mcp, services: dict):
             if status == "unknown" and codebase_info.cpg_path and os.path.exists(codebase_info.cpg_path):
                 status = "ready"
             
+            # Ensure Joern server is running if status is ready
+            joern_port = codebase_info.joern_port
+            if status == "ready":
+                joern_server_manager = services.get("joern_server_manager")
+                if joern_server_manager:
+                    # Check if running
+                    is_running = False
+                    if joern_port:
+                        is_running = joern_server_manager.is_server_running(codebase_hash)
+                    
+                    if not is_running:
+                        logger.info(f"Joern server not running for ready codebase {codebase_hash}, starting it...")
+                        try:
+                            # Start server
+                            joern_port = joern_server_manager.spawn_server(codebase_hash)
+                            
+                            # Load CPG
+                            container_cpg_path = codebase_info.metadata.get("container_cpg_path")
+                            if not container_cpg_path:
+                                container_cpg_path = f"/playground/cpgs/{codebase_hash}/cpg.bin"
+                                
+                            joern_server_manager.load_cpg(codebase_hash, container_cpg_path)
+                            
+                            # Update port in DB
+                            codebase_tracker.update_codebase(codebase_hash, joern_port=joern_port)
+                            logger.info(f"Joern server started on port {joern_port}")
+                        except Exception as e:
+                            logger.warning(f"Failed to start Joern server in get_cpg_status: {e}")
+                            # Don't fail the status check, just return what we have but maybe with a warning
+            
             return {
                 "codebase_hash": codebase_hash,
                 "status": status,
                 "cpg_path": codebase_info.cpg_path,
-                "joern_port": codebase_info.joern_port,
+                "joern_port": joern_port,
                 "source_type": codebase_info.source_type,
                 "source_path": codebase_info.source_path,
                 "language": codebase_info.language,
