@@ -28,7 +28,7 @@ from src.utils import DBManager, setup_logging
 from src.tools import register_tools
 
 # Version information - bump this when releasing new versions
-VERSION = "0.3.2-beta"
+VERSION = "0.3.3-beta"
 
 # Global service instances
 services = {}
