@@ -6,7 +6,8 @@ Tools for exploring and navigating codebase structure
 import logging
 import os
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Annotated
+from pydantic import Field
 
 from ..exceptions import (
             ValidationError,
@@ -20,45 +21,34 @@ def register_code_browsing_tools(mcp, services: dict):
     """Register code browsing MCP tools with the FastMCP server"""
 
 
-    @mcp.tool()
+    @mcp.tool(
+        description="""List methods/functions in the codebase.
+
+Discover all methods and functions defined in the analyzed code. This is
+essential for understanding the codebase structure and finding specific
+functions to analyze.
+
+Returns:
+    {
+        "success": true,
+        "methods": [...],
+        "total": 100,create_cpg_session
+        "page": 1,
+        "page_size": 100,
+        "total_pages": 1
+    }"""
+    )
     def list_methods(
-        codebase_hash: str,
-        name_pattern: Optional[str] = None,
-        file_pattern: Optional[str] = None,
-        callee_pattern: Optional[str] = None,
-        include_external: bool = False,
-        limit: int = 1000,
-        page: int = 1,
-        page_size: int = 100,
+        codebase_hash: Annotated[str, Field(description="The session ID from create_cpg_session")],
+        name_pattern: Annotated[Optional[str], Field(description="Optional regex to filter method names (e.g., '.*authenticate.*')")] = None,
+        file_pattern: Annotated[Optional[str], Field(description="Optional regex to filter by file path")] = None,
+        callee_pattern: Annotated[Optional[str], Field(description="Optional regex to filter for methods that call a specific function (e.g., 'memcpy|free|malloc')")] = None,
+        include_external: Annotated[bool, Field(description="Include external/library methods")] = False,
+        limit: Annotated[int, Field(description="Maximum number of results to fetch for caching")] = 1000,
+        page: Annotated[int, Field(description="Page number")] = 1,
+        page_size: Annotated[int, Field(description="Number of results per page")] = 100,
     ) -> Dict[str, Any]:
-        """
-        List methods/functions in the codebase.
-
-        Discover all methods and functions defined in the analyzed code. This is
-        essential for understanding the codebase structure and finding specific
-        functions to analyze.
-
-        Args:
-            codebase_hash: The session ID from create_cpg_session
-            name_pattern: Optional regex to filter method names (e.g., ".*authenticate.*")
-            file_pattern: Optional regex to filter by file path
-            callee_pattern: Optional regex to filter for methods that call a specific function
-                (e.g., "memcpy|free|malloc")
-            include_external: Include external/library methods (default: false)
-            limit: Maximum number of results to fetch for caching (default: 1000)
-            page: Page number (default: 1)
-            page_size: Number of results per page (default: 100)
-
-        Returns:
-            {
-                "success": true,
-                "methods": [...],
-                "total": 100,
-                "page": 1,
-                "page_size": 100,
-                "total_pages": 1
-            }
-        """
+        """List methods/functions in the codebase."""
         try:
             code_browsing_service = services["code_browsing_service"]
             return code_browsing_service.list_methods(
@@ -84,34 +74,27 @@ def register_code_browsing_tools(mcp, services: dict):
                 "error": {"code": "INTERNAL_ERROR", "message": str(e)},
             }
 
-    @mcp.tool()
+    @mcp.tool(
+        description="""List source files in the codebase.
+
+Returns:
+    {
+        "success": true,
+        "files": [...],
+        "total": 100,
+        "page": 1,
+        "page_size": 100,
+        "total_pages": 1
+    }"""
+    )
     def list_files(
-        codebase_hash: str,
-        local_path: Optional[str] = None,
-        limit: int = 1000,
-        page: int = 1,
-        page_size: int = 100,
+        codebase_hash: Annotated[str, Field(description="The session ID from create_cpg_create")],
+        local_path: Annotated[Optional[str], Field(description="Optional path inside the codebase to list (relative to source root or absolute). When provided, per-directory limit is increased to 50.")] = None,
+        limit: Annotated[int, Field(description="Maximum number of results to fetch for caching")] = 1000,
+        page: Annotated[int, Field(description="Page number")] = 1,
+        page_size: Annotated[int, Field(description="Number of results per page")] = 100,
     ) -> Dict[str, Any]:
-        """
-        List source files in the codebase.
-
-        Args:
-            codebase_hash: The session ID from create_cpg_create
-            local_path: Optional path inside the codebase to list (relative to source root or absolute). When provided, per-directory limit is increased to 50.
-            limit: Maximum number of results to fetch for caching (default: 1000)
-            page: Page number (default: 1)
-            page_size: Number of results per page (default: 100)
-
-        Returns:
-            {
-                "success": true,
-                "files": [...],
-                "total": 100,
-                "page": 1,
-                "page_size": 100,
-                "total_pages": 1
-            }
-        """
+        """List source files in the codebase."""
         try:
             code_browsing_service = services["code_browsing_service"]
             return code_browsing_service.list_files(
@@ -135,36 +118,33 @@ def register_code_browsing_tools(mcp, services: dict):
             }
 
 
-    @mcp.tool()
-    def get_method_source(
-        codebase_hash: str, method_name: str, filename: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """
-        Get the source code of a specific method.
+    @mcp.tool(
+        description="""Get the source code of a specific method.
 
-        Retrieve the actual source code for a method to understand its implementation.
-        Useful when you need to examine the details of a specific function.
+Retrieve the actual source code for a method to understand its implementation.
+Useful when you need to examine the details of a specific function.
 
-        Args:
-            codebase_hash: The session ID from create_cpg_session
-            method_name: Name of the method (can be regex pattern)
-            filename: Optional filename to disambiguate methods with same name
-
-        Returns:
+Returns:
+    {
+        "success": true,
+        "methods": [
             {
-                "success": true,
-                "methods": [
-                    {
-                        "name": "main",
-                        "filename": "main.c",
-                        "lineNumber": 10,
-                        "lineNumberEnd": 20,
-                        "code": "int main() {\n    printf(\"Hello\");\n    return 0;\n}"
-                    }
-                ],
-                "total": 1
+                "name": "main",
+                "filename": "main.c",
+                "lineNumber": 10,
+                "lineNumberEnd": 20,
+                "code": "int main() {\\n    printf("Hello");\\n    return 0;\\n}"
             }
-        """
+        ],
+        "total": 1
+    }"""
+    )
+    def get_method_source(
+        codebase_hash: Annotated[str, Field(description="The session ID from create_cpg_session")],
+        method_name: Annotated[str, Field(description="Name of the method (can be regex pattern)")],
+        filename: Annotated[Optional[str], Field(description="Optional filename to disambiguate methods with same name")] = None,
+    ) -> Dict[str, Any]:
+        """Get the source code of a specific method."""
         try:
             validate_codebase_hash(codebase_hash)
 
@@ -295,39 +275,31 @@ def register_code_browsing_tools(mcp, services: dict):
                 "error": {"code": "INTERNAL_ERROR", "message": str(e)},
             }
 
-    @mcp.tool()
+    @mcp.tool(
+        description="""List function/method calls in the codebase.
+
+Discover call relationships between functions. Essential for understanding
+control flow and dependencies in the code.
+
+Returns:
+    {
+        "success": true,
+        "calls": [...],
+        "total": 100,
+        "page": 1,
+        "page_size": 100,
+        "total_pages": 1
+    }"""
+    )
     def list_calls(
-        codebase_hash: str,
-        caller_pattern: Optional[str] = None,
-        callee_pattern: Optional[str] = None,
-        limit: int = 1000,
-        page: int = 1,
-        page_size: int = 100,
+        codebase_hash: Annotated[str, Field(description="The session ID from create_cpg_session")],
+        caller_pattern: Annotated[Optional[str], Field(description="Optional regex to filter caller method names")] = None,
+        callee_pattern: Annotated[Optional[str], Field(description="Optional regex to filter callee method names")] = None,
+        limit: Annotated[int, Field(description="Maximum number of results to fetch for caching")] = 1000,
+        page: Annotated[int, Field(description="Page number")] = 1,
+        page_size: Annotated[int, Field(description="Number of results per page")] = 100,
     ) -> Dict[str, Any]:
-        """
-        List function/method calls in the codebase.
-
-        Discover call relationships between functions. Essential for understanding
-        control flow and dependencies in the code.
-
-        Args:
-            codebase_hash: The session ID from create_cpg_session
-            caller_pattern: Optional regex to filter caller method names
-            callee_pattern: Optional regex to filter callee method names
-            limit: Maximum number of results to fetch for caching (default: 1000)
-            page: Page number (default: 1)
-            page_size: Number of results per page (default: 100)
-
-        Returns:
-            {
-                "success": true,
-                "calls": [...],
-                "total": 100,
-                "page": 1,
-                "page_size": 100,
-                "total_pages": 1
-            }
-        """
+        """List function/method calls in the codebase."""
         try:
             code_browsing_service = services["code_browsing_service"]
             return code_browsing_service.list_calls(
@@ -352,35 +324,32 @@ def register_code_browsing_tools(mcp, services: dict):
             }
 
 
-    @mcp.tool()
+    @mcp.tool(
+        description="""Get the call graph for a specific method.
+
+Understand what functions a method calls (outgoing) or what functions
+call it (incoming). Essential for impact analysis and understanding
+code dependencies.
+
+Returns:
+    {
+        "success": true,
+        "root_method": "authenticate",
+        "direction": "outgoing",
+        "calls": [
+            {"from": "authenticate", "to": "validate_password", "depth": 1},
+            {"from": "validate_password", "to": "hash_password", "depth": 2}
+        ],
+        "total": 2
+    }"""
+    )
     def get_call_graph(
-        codebase_hash: str, method_name: str, depth: int = 5, direction: str = "outgoing"
+        codebase_hash: Annotated[str, Field(description="The session ID from create_cpg_session")],
+        method_name: Annotated[str, Field(description="Name of the method to analyze (can be regex)")],
+        depth: Annotated[int, Field(description="How many levels deep to traverse (max recommended: 10)")] = 5,
+        direction: Annotated[str, Field(description="Either 'outgoing' (callees) or 'incoming' (callers)")] = "outgoing",
     ) -> Dict[str, Any]:
-        """
-        Get the call graph for a specific method.
-
-        Understand what functions a method calls (outgoing) or what functions
-        call it (incoming). Essential for impact analysis and understanding
-        code dependencies.
-
-        Args:
-            codebase_hash: The session ID from create_cpg_session
-            method_name: Name of the method to analyze (can be regex)
-            depth: How many levels deep to traverse (default: 5, max recommended: 10)
-            direction: "outgoing" (callees) or "incoming" (callers)
-
-        Returns:
-            {
-                "success": true,
-                "root_method": "authenticate",
-                "direction": "outgoing",
-                "calls": [
-                    {"from": "authenticate", "to": "validate_password", "depth": 1},
-                    {"from": "validate_password", "to": "hash_password", "depth": 2}
-                ],
-                "total": 2
-            }
-        """
+        """Get the call graph for a specific method."""
         try:
             validate_codebase_hash(codebase_hash)
 
@@ -615,33 +584,32 @@ def register_code_browsing_tools(mcp, services: dict):
                 "error": {"code": "INTERNAL_ERROR", "message": str(e)},
             }
 
-    @mcp.tool()
-    def list_parameters(codebase_hash: str, method_name: str) -> Dict[str, Any]:
-        """
-        List parameters of a specific method.
+    @mcp.tool(
+        description="""List parameters of a specific method.
 
-        Get detailed information about method parameters including their names,
-        types, and order. Useful for understanding function signatures.
+Get detailed information about method parameters including their names,
+types, and order. Useful for understanding function signatures.
 
-        Args:
-            codebase_hash: The session ID from create_cpg_session
-            method_name: Name of the method (can be regex pattern)
-
-        Returns:
+Returns:
+    {
+        "success": true,
+        "methods": [
             {
-                "success": true,
-                "methods": [
-                    {
-                        "method": "authenticate",
-                        "parameters": [
-                            {"name": "username", "type": "string", "index": 1},
-                            {"name": "password", "type": "string", "index": 2}
-                        ]
-                    }
-                ],
-                "total": 1
+                "method": "authenticate",
+                "parameters": [
+                    {"name": "username", "type": "string", "index": 1},
+                    {"name": "password", "type": "string", "index": 2}
+                ]
             }
-        """
+        ],
+        "total": 1
+    }"""
+    )
+    def list_parameters(
+        codebase_hash: Annotated[str, Field(description="The session ID from create_cpg_session")],
+        method_name: Annotated[str, Field(description="Name of the method (can be regex pattern)")],
+    ) -> Dict[str, Any]:
+        """List parameters of a specific method."""
         try:
             code_browsing_service = services["code_browsing_service"]
             return code_browsing_service.list_parameters(
@@ -662,41 +630,35 @@ def register_code_browsing_tools(mcp, services: dict):
             }
 
 
-    @mcp.tool()
-    def find_literals(
-        codebase_hash: str,
-        pattern: Optional[str] = None,
-        literal_type: Optional[str] = None,
-        limit: int = 50,
-    ) -> Dict[str, Any]:
-        """
-        Find literal values in the code (strings, numbers, etc).
+    @mcp.tool(
+        description="""Find literal values in the code (strings, numbers, etc).
 
-        Search for hardcoded values like strings, numbers, or constants.
-        Useful for finding configuration values, API keys, URLs, or
-        magic numbers in the code.
+Search for hardcoded values like strings, numbers, or constants.
+Useful for finding configuration values, API keys, URLs, or
+magic numbers in the code.
 
-        Args:
-            codebase_hash: The session ID from create_cpg_session
-            pattern: Optional regex to filter literal values (e.g., ".*password.*")
-            literal_type: Optional type filter (e.g., "string", "int")
-            limit: Maximum number of results (default: 50)
-
-        Returns:
+Returns:
+    {
+        "success": true,
+        "literals": [
             {
-                "success": true,
-                "literals": [
-                    {
-                        "value": "admin_password",
-                        "type": "string",
-                        "filename": "config.c",
-                        "lineNumber": 42,
-                        "method": "init_config"
-                    }
-                ],
-                "total": 1
+                "value": "admin_password",
+                "type": "string",
+                "filename": "config.c",
+                "lineNumber": 42,
+                "method": "init_config"
             }
-        """
+        ],
+        "total": 1
+    }"""
+    )
+    def find_literals(
+        codebase_hash: Annotated[str, Field(description="The session ID from create_cpg_session")],
+        pattern: Annotated[Optional[str], Field(description="Optional regex to filter literal values (e.g., '.*password.*')")] = None,
+        literal_type: Annotated[Optional[str], Field(description="Optional type filter (e.g., 'string', 'int')")] = None,
+        limit: Annotated[int, Field(description="Maximum number of results")] = 50,
+    ) -> Dict[str, Any]:
+        """Find literal values in the code (strings, numbers, etc)."""
         try:
             code_browsing_service = services["code_browsing_service"]
             return code_browsing_service.find_literals(
@@ -719,30 +681,29 @@ def register_code_browsing_tools(mcp, services: dict):
             }
 
 
-    @mcp.tool()
-    def get_codebase_summary(codebase_hash: str) -> Dict[str, Any]:
-        """
-        Get a high-level summary of the codebase structure.
+    @mcp.tool(
+        description="""Get a high-level summary of the codebase structure.
 
-        Provides an overview including file count, method count, language,
-        and other metadata. Useful as a first step when exploring a new codebase.
+Provides an overview including file count, method count, language,
+and other metadata. Useful as a first step when exploring a new codebase.
 
-        Args:
-            codebase_hash: The session ID from create_cpg_session
-
-        Returns:
-            {
-                "success": true,
-                "summary": {
-                    "language": "C",
-                    "total_files": 15,
-                    "total_methods": 127,
-                    "total_calls": 456,
-                    "external_methods": 89,
-                    "lines_of_code": 5432
-                }
-            }
-        """
+Returns:
+    {
+        "success": true,
+        "summary": {
+            "language": "C",
+            "total_files": 15,
+            "total_methods": 127,
+            "total_calls": 456,
+            "external_methods": 89,
+            "lines_of_code": 5432
+        }
+    }"""
+    )
+    def get_codebase_summary(
+        codebase_hash: Annotated[str, Field(description="The session ID from create_cpg_session")]
+    ) -> Dict[str, Any]:
+        """Get a high-level summary of the codebase structure."""
         try:
             validate_codebase_hash(codebase_hash)
 
@@ -781,6 +742,7 @@ def register_code_browsing_tools(mcp, services: dict):
             )).toJsonPretty
             """
 
+            print(f"DEBUG: codebase_hash received: '{codebase_hash}'")
             stats_result = query_executor.execute_query(
                 codebase_hash=codebase_hash,
                 cpg_path=codebase_info.cpg_path,
@@ -788,6 +750,7 @@ def register_code_browsing_tools(mcp, services: dict):
                 timeout=30,
                 limit=1,
             )
+            print(f"DEBUG: stats_result success: {stats_result.success}, data: {stats_result.data}")
 
             summary = {
                 "language": language,
@@ -800,12 +763,23 @@ def register_code_browsing_tools(mcp, services: dict):
 
             if stats_result.success and stats_result.data:
                 item = stats_result.data[0]
+                data = None
+                
                 if isinstance(item, dict):
-                    summary["total_files"] = int(item.get("_1", 0))
-                    summary["total_methods"] = int(item.get("_2", 0))
-                    summary["user_defined_methods"] = int(item.get("_3", 0))
-                    summary["total_calls"] = int(item.get("_4", 0))
-                    summary["total_literals"] = int(item.get("_5", 0))
+                    data = item
+                elif isinstance(item, str):
+                    try:
+                        import json
+                        data = json.loads(item)
+                    except json.JSONDecodeError:
+                        logger.warning(f"Failed to parse summary stats JSON: {item[:100]}...")
+                
+                if data:
+                    summary["total_files"] = int(data.get("_1", 0))
+                    summary["total_methods"] = int(data.get("_2", 0))
+                    summary["user_defined_methods"] = int(data.get("_3", 0))
+                    summary["total_calls"] = int(data.get("_4", 0))
+                    summary["total_literals"] = int(data.get("_5", 0))
                     summary["external_methods"] = (
                         summary["total_methods"] - summary["user_defined_methods"]
                     )
@@ -825,31 +799,28 @@ def register_code_browsing_tools(mcp, services: dict):
                 "error": {"code": "INTERNAL_ERROR", "message": str(e)},
             }
 
-    @mcp.tool()
+    @mcp.tool(
+        description="""Retrieve a code snippet from a specific file with line range.
+
+Get the source code from a file between specified start and end line numbers.
+Useful for examining specific parts of the codebase.
+
+Returns:
+    {
+        "success": true,
+        "filename": "main.c",
+        "start_line": 10,
+        "end_line": 20,
+        "code": "example code here"
+    }"""
+    )
     def get_code_snippet(
-        codebase_hash: str, filename: str, start_line: int, end_line: int
+        codebase_hash: Annotated[str, Field(description="The session ID from create_cpg_session")],
+        filename: Annotated[str, Field(description="Name of the file to retrieve code from (relative to source root)")],
+        start_line: Annotated[int, Field(description="Starting line number (1-indexed)")],
+        end_line: Annotated[int, Field(description="Ending line number (1-indexed, inclusive)")],
     ) -> Dict[str, Any]:
-        """
-        Retrieve a code snippet from a specific file with line range.
-
-        Get the source code from a file between specified start and end line numbers.
-        Useful for examining specific parts of the codebase.
-
-        Args:
-            codebase_hash: The session ID from create_cpg_session
-            filename: Name of the file to retrieve code from (relative to source root)
-            start_line: Starting line number (1-indexed)
-            end_line: Ending line number (1-indexed, inclusive)
-
-        Returns:
-            {
-                "success": true,
-                "filename": "main.c",
-                "start_line": 10,
-                "end_line": 20,
-                "code": "example code here"
-            }
-        """
+        """Retrieve a code snippet from a specific file with line range."""
         try:
             validate_codebase_hash(codebase_hash)
 
@@ -935,35 +906,29 @@ def register_code_browsing_tools(mcp, services: dict):
                 "success": False,
                 "error": {"code": "INTERNAL_ERROR", "message": str(e)},
             }
-    @mcp.tool()
+    @mcp.tool(
+        description="""Execute a raw CPGQL query against the codebase.
+
+Run arbitrary Code Property Graph Query Language (CPGQL) queries
+for advanced analysis and exploration of the codebase structure.
+
+Returns:
+    {
+        "success": true,
+        "stdout": "raw stdout output",
+        "stderr": "raw stderr output if any",
+        "execution_time": 1.23,
+        "validation": {...},
+        "suggestion": "helpful hint if error occurs"
+    }"""
+    )
     def run_cpgql_query(
-        codebase_hash: str,
-        query: str,
-        timeout: Optional[int] = None,
-        validate: bool = False,
+        codebase_hash: Annotated[str, Field(description="The session ID from create_cpg_session")],
+        query: Annotated[str, Field(description="The CPGQL query string to execute")],
+        timeout: Annotated[Optional[int], Field(description="Optional timeout in seconds")] = None,
+        validate: Annotated[bool, Field(description="If true, validate query syntax before executing")] = False,
     ) -> Dict[str, Any]:
-        """
-        Execute a raw CPGQL query against the codebase.
-
-        Run arbitrary Code Property Graph Query Language (CPGQL) queries
-        for advanced analysis and exploration of the codebase structure.
-
-        Args:
-            codebase_hash: The session ID from create_cpg_session
-            query: The CPGQL query string to execute
-            timeout: Optional timeout in seconds (default: 30)
-            validate: If true, validate query syntax before executing (default: false)
-
-        Returns:
-            {
-                "success": true,
-                "stdout": "raw stdout output",
-                "stderr": "raw stderr output if any",
-                "execution_time": 1.23,
-                "validation": {...},  # included if validate=true
-                "suggestion": "helpful hint if error occurs"
-            }
-        """
+        """Execute a raw CPGQL query against the codebase."""
         try:
             from ..utils.cpgql_validator import CPGQLValidator, QueryTransformer
             import time
@@ -1046,46 +1011,33 @@ def register_code_browsing_tools(mcp, services: dict):
                 "error": {"code": "INTERNAL_ERROR", "message": str(e)},
             }
 
-    @mcp.tool()
+    @mcp.tool(
+        description="""Find bounds checks near buffer access.
+
+Verify if buffer accesses have corresponding bounds checks by analyzing
+comparison operations involving the index variable. This helps identify
+potential buffer overflow vulnerabilities where bounds checks are missing
+or happen after the access.
+
+Returns:
+    {
+        "success": true,
+        "buffer_access": {
+            "line": 3393,
+            "code": "buf[len++] = c",
+            "buffer": "buf",
+            "index": "len++"
+        },
+        "bounds_checks": [ ... ],
+        "check_before_access": false,
+        "check_after_access": true
+    }"""
+    )
     def find_bounds_checks(
-        codebase_hash: str, buffer_access_location: str
+        codebase_hash: Annotated[str, Field(description="The session ID from create_cpg_session")],
+        buffer_access_location: Annotated[str, Field(description="Location of buffer access in format 'filename:line' (e.g., 'parser.c:3393')")],
     ) -> Dict[str, Any]:
-        """
-        Find bounds checks near buffer access.
-
-        Verify if buffer accesses have corresponding bounds checks by analyzing
-        comparison operations involving the index variable. This helps identify
-        potential buffer overflow vulnerabilities where bounds checks are missing
-        or happen after the access.
-
-        Args:
-            codebase_hash: The session ID from create_cpg_session
-            buffer_access_location: Location of buffer access in format "filename:line"
-                                  (e.g., "parser.c:3393")
-
-        Returns:
-            {
-                "success": true,
-                "buffer_access": {
-                    "line": 3393,
-                    "code": "buf[len++] = c",
-                    "buffer": "buf",
-                    "index": "len++"
-                },
-                "bounds_checks": [
-                    {
-                        "line": 3396,
-                        "code": "if (len >= XML_MAX_NAMELEN)",
-                        "checked_variable": "len",
-                        "bound": "XML_MAX_NAMELEN",
-                        "operator": ">=",
-                        "position": "AFTER_ACCESS"
-                    }
-                ],
-                "check_before_access": false,
-                "check_after_access": true
-            }
-        """
+        """Find bounds checks near buffer access."""
         try:
             validate_codebase_hash(codebase_hash)
 
@@ -1286,26 +1238,22 @@ def register_code_browsing_tools(mcp, services: dict):
                 "error": {"code": "INTERNAL_ERROR", "message": str(e)},
             }
 
-    @mcp.tool()
+    @mcp.tool(
+        description="""Get comprehensive CPGQL syntax help and examples.
+
+Provides syntax documentation, common patterns, node types, and error solutions
+for CPGQL query writing.
+
+Returns:
+    {
+        "success": true,
+        "syntax_helpers": { ... },
+        "error_guide": { ... },
+        "quick_reference": { ... }
+    }"""
+    )
     def get_cpgql_syntax_help() -> Dict[str, Any]:
-        """
-        Get comprehensive CPGQL syntax help and examples.
-
-        Provides syntax documentation, common patterns, node types, and error solutions
-        for CPGQL query writing.
-
-        Returns:
-            {
-                "success": true,
-                "syntax_helpers": {
-                    "string_matching": [...],
-                    "common_patterns": {...},
-                    "node_types": [...]
-                },
-                "error_guide": {...},
-                "quick_reference": {...}
-            }
-        """
+        """Get comprehensive CPGQL syntax help and examples."""
         try:
             from ..utils.cpgql_validator import CPGQLValidator
             

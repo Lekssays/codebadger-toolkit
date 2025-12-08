@@ -5,7 +5,8 @@ Security-focused tools for analyzing data flows and vulnerabilities
 
 import logging
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Annotated
+from pydantic import Field
 
 from ..exceptions import (
             ValidationError,
@@ -18,50 +19,40 @@ logger = logging.getLogger(__name__)
 def register_taint_analysis_tools(mcp, services: dict):
     """Register taint analysis MCP tools with the FastMCP server"""
 
-    @mcp.tool()
-    def find_taint_sources(
-        codebase_hash: str,
-        language: Optional[str] = None,
-        source_patterns: Optional[list] = None,
-        filename: Optional[str] = None,
-        limit: int = 200,
-    ) -> Dict[str, Any]:
-        """
-        Locate likely external input points (taint sources).
+    @mcp.tool(
+        description="""Locate likely external input points (taint sources).
 
-        Search for function calls that could be entry points for untrusted data,
-        such as user input, environment variables, or network data. Useful for
-        identifying where external data enters the program.
+Search for function calls that could be entry points for untrusted data,
+such as user input, environment variables, or network data. Useful for
+identifying where external data enters the program.
 
-        The tool uses a comprehensive list of default sources configured in the
-        system configuration unless specific patterns are provided.
+The tool uses a comprehensive list of default sources configured in the
+system configuration unless specific patterns are provided.
 
-        Args:
-            codebase_hash: The session ID from create_cpg_session
-            language: Programming language to use for default patterns (e.g., "c", "java")
-                If not provided, uses the session's language
-            source_patterns: Optional list of regex patterns to match source function names
-                (e.g., ["getenv", "fgets", "scanf"]). If not provided, uses default patterns
-            filename: Optional filename to filter results (e.g., "shell.c", "main.c")
-                Uses regex matching, so partial names work (e.g., "shell" matches "shell.c")
-            limit: Maximum number of results to return (default: 200)
-
-        Returns:
+Returns:
+    {
+        "success": true,
+        "sources": [
             {
-                "success": true,
-                "sources": [
-                    {
-                        "node_id": "12345",
-                        "name": "getenv",
-                        "code": "getenv(\"PATH\")",
-                        "filename": "main.c",
-                        "lineNumber": 42,
-                        "method": "main"
-                    }
-                ],
-                "total": 1
+                "node_id": "12345",
+                "name": "getenv",
+                "code": "getenv(\"PATH\")",
+                "filename": "main.c",
+                "lineNumber": 42,
+                "method": "main"
             }
-        """
+        ],
+        "total": 1
+    }"""
+    )
+    def find_taint_sources(
+        codebase_hash: Annotated[str, Field(description="The session ID from create_cpg_session")],
+        language: Annotated[Optional[str], Field(description="Programming language to use for default patterns (e.g., 'c', 'java'). If not provided, uses the session's language")] = None,
+        source_patterns: Annotated[Optional[list], Field(description="Optional list of regex patterns to match source function names (e.g., ['getenv', 'fgets', 'scanf']). If not provided, uses default patterns")] = None,
+        filename: Annotated[Optional[str], Field(description="Optional filename to filter results (e.g., 'shell.c', 'main.c'). Uses regex matching, so partial names work (e.g., 'shell' matches 'shell.c')")] = None,
+        limit: Annotated[int, Field(description="Maximum number of results to return")] = 200,
+    ) -> Dict[str, Any]:
+        """Locate likely external input points (taint sources)."""
         try:
             validate_codebase_hash(codebase_hash)
 
@@ -141,50 +132,40 @@ def register_taint_analysis_tools(mcp, services: dict):
                 "error": {"code": "INTERNAL_ERROR", "message": str(e)},
             }
 
-    @mcp.tool()
-    def find_taint_sinks(
-        codebase_hash: str,
-        language: Optional[str] = None,
-        sink_patterns: Optional[list] = None,
-        filename: Optional[str] = None,
-        limit: int = 200,
-    ) -> Dict[str, Any]:
-        """
-        Locate dangerous sinks where tainted data could cause vulnerabilities.
+    @mcp.tool(
+        description="""Locate dangerous sinks where tainted data could cause vulnerabilities.
 
-        Search for function calls that could be security-sensitive destinations
-        for data, such as system execution, file operations, or format strings.
-        Useful for identifying where untrusted data could cause harm.
+Search for function calls that could be security-sensitive destinations
+for data, such as system execution, file operations, or format strings.
+Useful for identifying where untrusted data could cause harm.
 
-        The tool uses a comprehensive list of default sinks configured in the
-        system configuration unless specific patterns are provided.
+The tool uses a comprehensive list of default sinks configured in the
+system configuration unless specific patterns are provided.
 
-        Args:
-            codebase_hash: The session ID from create_cpg_session
-            language: Programming language to use for default patterns (e.g., "c", "java")
-                If not provided, uses the session's language
-            sink_patterns: Optional list of regex patterns to match sink function names
-                (e.g., ["system", "popen", "sprintf"]). If not provided, uses default patterns
-            filename: Optional filename to filter results (e.g., "shell.c", "main.c")
-                Uses regex matching, so partial names work (e.g., "shell" matches "shell.c")
-            limit: Maximum number of results to return (default: 200)
-
-        Returns:
+Returns:
+    {
+        "success": true,
+        "sinks": [
             {
-                "success": true,
-                "sinks": [
-                    {
-                        "node_id": "67890",
-                        "name": "system",
-                        "code": "system(cmd)",
-                        "filename": "main.c",
-                        "lineNumber": 100,
-                        "method": "execute_command"
-                    }
-                ],
-                "total": 1
+                "node_id": "67890",
+                "name": "system",
+                "code": "system(cmd)",
+                "filename": "main.c",
+                "lineNumber": 100,
+                "method": "execute_command"
             }
-        """
+        ],
+        "total": 1
+    }"""
+    )
+    def find_taint_sinks(
+        codebase_hash: Annotated[str, Field(description="The session ID from create_cpg_session")],
+        language: Annotated[Optional[str], Field(description="Programming language to use for default patterns (e.g., 'c', 'java'). If not provided, uses the session's language")] = None,
+        sink_patterns: Annotated[Optional[list], Field(description="Optional list of regex patterns to match sink function names (e.g., ['system', 'popen', 'sprintf']). If not provided, uses default patterns")] = None,
+        filename: Annotated[Optional[str], Field(description="Optional filename to filter results (e.g., 'shell.c', 'main.c'). Uses regex matching, so partial names work (e.g., 'shell' matches 'shell.c')")] = None,
+        limit: Annotated[int, Field(description="Maximum number of results to return")] = 200,
+    ) -> Dict[str, Any]:
+        """Locate dangerous sinks where tainted data could cause vulnerabilities."""
         try:
             validate_codebase_hash(codebase_hash)
 
@@ -262,152 +243,104 @@ def register_taint_analysis_tools(mcp, services: dict):
                 "error": {"code": "INTERNAL_ERROR", "message": str(e)},
             }
 
-    @mcp.tool()
+    @mcp.tool(
+        description="""Find dataflow paths from source to sink by tracking through assignments and identifiers.
+
+This tool traces how data flows from a source call (e.g., malloc, getenv) to a sink call
+(e.g., free, system) by following the intermediate variables, assignments, and identifiers.
+
+✅ WHAT IT CAN DO:
+- Track return value flows: allocate() → variable → deallocate(variable)
+  Example: ptr = allocate_memory(size); ... deallocate_memory(ptr);
+- Trace variable assignments across statements in the same function
+  Example: input = get_user_data(); ... temp = input; ... process(temp);
+- Find direct identifier matches between source output and sink input
+- Work within intra-procedural scope (same function/method)
+
+❌ WHAT IT CANNOT DO:
+- Interprocedural dataflow (across function boundaries)
+  Example: Can't track: main() calls helper(x) which passes x to worker(y)
+  Reason: Requires alias analysis and parameter tracking
+- Complex transformations or computations on data
+  Example: Can't track: ptr = allocate(10); ptr2 = ptr + offset; deallocate(ptr2);
+  Reason: Doesn't understand pointer arithmetic
+- Array element or struct field flows
+  Example: Limited for: arr[i].field = allocate(); ... deallocate(arr[j].field);
+  Reason: Needs field-sensitive analysis
+- Control-flow dependent paths
+  Example: May miss: if(cond) ptr = allocate(); ... if(cond) deallocate(ptr);
+  Reason: Doesn't analyze conditions
+
+💡 HOW IT WORKS:
+1. Locates the source call (e.g., allocate_memory at line 42)
+2. Finds what variable receives the result (e.g., buffer = allocate_memory())
+3. Searches for that identifier in sink call arguments (e.g., deallocate_memory(buffer))
+4. Reports if there's a direct match
+
+🔧 USE THIS TOOL WHEN:
+- Checking for resource leaks: allocate/acquire → deallocate/release
+- Finding use-after-free: deallocate → subsequent use
+- Tracing user input: get_input/read_data → dangerous_function
+- Simple variable flow within one function
+
+⚠️ LIMITATIONS TO UNDERSTAND:
+- This is a SIMPLE identifier-based flow tracker, not full taint analysis
+- It finds DIRECT identifier matches, not semantic dataflow
+- For complex analysis, combine with get_call_graph and manual inspection
+- Best used as a starting point for deeper investigation
+
+Returns:
+    When source AND sink are provided:
+    {
+        "success": true,
+        "source": { "node_id": "12345", "code": "allocate_memory(100)", ... },
+        "sink": { "node_id": "67890", "code": "deallocate_memory(buffer)", ... },
+        "flow_found": true,
+        "flow_type": "direct_identifier_match",
+        "intermediate_variable": "buffer",
+        "details": { ... }
+    }
+
+    When ONLY source is provided:
+    {
+        "success": true,
+        "source": { ... },
+        "flows": [
+            {
+                "path_id": 0,
+                "path_length": 3,
+                "nodes": [ ... ]
+            }
+        ],
+        "total_flows": 1,
+        "message": "Found 1 flows from source to dangerous sinks"
+    }
+
+Example - Source and Sink provided:
+    find_taint_flows(
+        codebase_hash="abc-123",
+        source_location="main.c:42",   # allocate_memory(100)
+        sink_location="main.c:58"      # deallocate_memory(buffer)
+    )
+    # Result: ✓ Found flow through variable 'buffer'
+
+Example - Only Source provided:
+    find_taint_flows(
+        codebase_hash="abc-123",
+        source_location="main.c:42"    # allocate_memory(100)
+    )
+    # Result: ✓ Found flows to all dangerous sinks (free, system, etc.) that use the allocated variable"""
+    )
     def find_taint_flows(
-        codebase_hash: str,
-        source_node_id: Optional[str] = None,
-        sink_node_id: Optional[str] = None,
-        source_location: Optional[str] = None,
-        sink_location: Optional[str] = None,
-        max_path_length: int = 20,
-        timeout: int = 60,
+        codebase_hash: Annotated[str, Field(description="The session ID from create_cpg_session")],
+        source_node_id: Annotated[Optional[str], Field(description="Node ID of source call (from find_taint_sources). Example: '12345'")] = None,
+        sink_node_id: Annotated[Optional[str], Field(description="Node ID of sink call (from find_taint_sinks). Example: '67890'")] = None,
+        source_location: Annotated[Optional[str], Field(description="Alternative: 'filename:line' or 'filename:line:method'. Example: 'main.c:42' or 'main.c:42:process_data'")] = None,
+        sink_location: Annotated[Optional[str], Field(description="Alternative: 'filename:line' or 'filename:line:method'. Example: 'main.c:58' or 'main.c:58:process_data'")] = None,
+        max_path_length: Annotated[int, Field(description="Maximum length of dataflow paths to consider in elements. Paths with more elements will be filtered out to avoid extremely long chains")] = 20,
+        timeout: Annotated[int, Field(description="Maximum execution time in seconds")] = 60,
     ) -> Dict[str, Any]:
-        """
-        Find dataflow paths from source to sink by tracking through assignments and identifiers.
-
-        This tool traces how data flows from a source call (e.g., malloc, getenv) to a sink call
-        (e.g., free, system) by following the intermediate variables, assignments, and identifiers.
-
-        ✅ WHAT IT CAN DO:
-        - Track return value flows: allocate() → variable → deallocate(variable)
-          Example: ptr = allocate_memory(size); ... deallocate_memory(ptr);
-        - Trace variable assignments across statements in the same function
-          Example: input = get_user_data(); ... temp = input; ... process(temp);
-        - Find direct identifier matches between source output and sink input
-        - Work within intra-procedural scope (same function/method)
-
-        ❌ WHAT IT CANNOT DO:
-        - Interprocedural dataflow (across function boundaries)
-          Example: Can't track: main() calls helper(x) which passes x to worker(y)
-          Reason: Requires alias analysis and parameter tracking
-        - Complex transformations or computations on data
-          Example: Can't track: ptr = allocate(10); ptr2 = ptr + offset; deallocate(ptr2);
-          Reason: Doesn't understand pointer arithmetic
-        - Array element or struct field flows
-          Example: Limited for: arr[i].field = allocate(); ... deallocate(arr[j].field);
-          Reason: Needs field-sensitive analysis
-        - Control-flow dependent paths
-          Example: May miss: if(cond) ptr = allocate(); ... if(cond) deallocate(ptr);
-          Reason: Doesn't analyze conditions
-
-        💡 HOW IT WORKS:
-        1. Locates the source call (e.g., allocate_memory at line 42)
-        2. Finds what variable receives the result (e.g., buffer = allocate_memory())
-        3. Searches for that identifier in sink call arguments (e.g., deallocate_memory(buffer))
-        4. Reports if there's a direct match
-
-        🔧 USE THIS TOOL WHEN:
-        - Checking for resource leaks: allocate/acquire → deallocate/release
-        - Finding use-after-free: deallocate → subsequent use
-        - Tracing user input: get_input/read_data → dangerous_function
-        - Simple variable flow within one function
-
-        ⚠️ LIMITATIONS TO UNDERSTAND:
-        - This is a SIMPLE identifier-based flow tracker, not full taint analysis
-        - It finds DIRECT identifier matches, not semantic dataflow
-        - For complex analysis, combine with get_call_graph and manual inspection
-        - Best used as a starting point for deeper investigation
-
-        Args:
-            codebase_hash: The session ID from create_cpg_session
-            source_node_id: Node ID of source call (from find_taint_sources)
-                Example: "12345"
-            sink_node_id: Node ID of sink call (from find_taint_sinks)
-                Example: "67890"
-            source_location: Alternative: "filename:line" or "filename:line:method"
-                Example: "main.c:42" or "main.c:42:process_data"
-            sink_location: Alternative: "filename:line" or "filename:line:method"
-                Example: "main.c:58" or "main.c:58:process_data"
-            max_path_length: Maximum length of dataflow paths to consider in elements (default: 20)
-                Paths with more elements will be filtered out to avoid extremely long chains
-            timeout: Maximum execution time in seconds (default: 60)
-
-        Returns:
-            When source AND sink are provided:
-            {
-                "success": true,
-                "source": {
-                    "node_id": "12345",
-                    "code": "allocate_memory(100)",
-                    "filename": "main.c",
-                    "lineNumber": 42,
-                    "method": "process_data"
-                },
-                "sink": {
-                    "node_id": "67890",
-                    "code": "deallocate_memory(buffer)",
-                    "filename": "main.c",
-                    "lineNumber": 58,
-                    "method": "process_data"
-                },
-                "flow_found": true,
-                "flow_type": "direct_identifier_match",
-                "intermediate_variable": "buffer",
-                "details": {
-                    "assignment": "buffer = allocate_memory(100)",
-                    "assignment_line": 42,
-                    "variable_uses": 3,
-                    "explanation": "allocate_memory() returns value assigned to 'buffer', which is used as argument to deallocate_memory()"
-                }
-            }
-
-            When ONLY source is provided:
-            {
-                "success": true,
-                "source": {
-                    "node_id": "12345",
-                    "code": "allocate_memory(100)",
-                    "filename": "main.c",
-                    "lineNumber": 42,
-                    "method": "process_data"
-                },
-                "flows": [
-                    {
-                        "path_id": 0,
-                        "path_length": 3,
-                        "nodes": [
-                            ["allocate_memory(100)", "main.c", 42, "CALL"],
-                            ["buffer", "main.c", 42, "IDENTIFIER"],
-                            ["deallocate_memory(buffer)", "main.c", 58, "CALL"]
-                        ]
-                    }
-                ],
-                "total_flows": 1,
-                "message": "Found 1 flows from source to dangerous sinks"
-            }
-
-        Example - Source and Sink provided:
-            find_taint_flows(
-                codebase_hash="abc-123",
-                source_location="main.c:42",   # allocate_memory(100)
-                sink_location="main.c:58"      # deallocate_memory(buffer)
-            )
-            # Result: ✓ Found flow through variable 'buffer'
-
-        Example - Only Source provided:
-            find_taint_flows(
-                codebase_hash="abc-123",
-                source_location="main.c:42"    # allocate_memory(100)
-            )
-            # Result: ✓ Found flows to all dangerous sinks (free, system, etc.) that use the allocated variable
-
-        Example - Only Sink provided (ERROR):
-            find_taint_flows(
-                codebase_hash="abc-123",
-                sink_location="main.c:58"      # deallocate_memory(buffer)
-            )
-            # Result: ❌ Validation error - only sink not supported
-        """
+        """Find dataflow paths from source to sink by tracking through assignments and identifiers."""
         try:
             validate_codebase_hash(codebase_hash)
 
@@ -602,31 +535,28 @@ def register_taint_analysis_tools(mcp, services: dict):
                 "error": {"code": "INTERNAL_ERROR", "message": str(e)},
             }
 
-    @mcp.tool()
+    @mcp.tool(
+        description="""Check if one method can reach another through the call graph.
+
+Determines whether the target method is reachable from the source method
+by following function calls. Useful for understanding code dependencies
+and potential execution paths.
+
+Returns:
+    {
+        "success": true,
+        "reachable": true,
+        "source_method": "main",
+        "target_method": "helper",
+        "message": "Method 'helper' is reachable from 'main'"
+    }"""
+    )
     def check_method_reachability(
-        codebase_hash: str, source_method: str, target_method: str
+        codebase_hash: Annotated[str, Field(description="The session ID from create_cpg_session")],
+        source_method: Annotated[str, Field(description="Name of the source method (can be regex pattern)")],
+        target_method: Annotated[str, Field(description="Name of the target method (can be regex pattern)")],
     ) -> Dict[str, Any]:
-        """
-        Check if one method can reach another through the call graph.
-
-        Determines whether the target method is reachable from the source method
-        by following function calls. Useful for understanding code dependencies
-        and potential execution paths.
-
-        Args:
-            codebase_hash: The session ID from create_cpg_session
-            source_method: Name of the source method (can be regex pattern)
-            target_method: Name of the target method (can be regex pattern)
-
-        Returns:
-            {
-                "success": true,
-                "reachable": true,
-                "source_method": "main",
-                "target_method": "helper",
-                "message": "Method 'helper' is reachable from 'main'"
-            }
-        """
+        """Check if one method can reach another through the call graph."""
         try:
             validate_codebase_hash(codebase_hash)
 
@@ -721,75 +651,48 @@ def register_taint_analysis_tools(mcp, services: dict):
                 "error": {"code": "INTERNAL_ERROR", "message": str(e)},
             }
 
-    @mcp.tool()
+    @mcp.tool(
+        description="""Build a program slice from a specific call node.
+
+Creates a backward program slice showing all code that could affect the
+execution at a specific point. This includes:
+- The call itself and its arguments
+- Dataflow: all assignments and operations affecting argument variables
+- Control flow: conditions that determine whether the call executes
+- Call graph: functions called and their data dependencies
+
+**Important**: Use node IDs (from list_calls) or specify exact locations to
+avoid ambiguity, especially when multiple calls appear on the same line.
+
+Returns:
+    {
+        "success": true,
+        "slice": {
+            "target_call": {
+                "node_id": "12345",
+                "name": "memcpy",
+                "code": "memcpy(buf, src, size)",
+                "filename": "main.c",
+                "lineNumber": 42,
+                "method": "process_data",
+                "arguments": ["buf", "src", "size"]
+            },
+            "dataflow": [ ... ],
+            "control_dependencies": [ ... ]
+        },
+        "total_nodes": 15
+    }"""
+    )
     def get_program_slice(
-        codebase_hash: str,
-        node_id: Optional[str] = None,
-        location: Optional[str] = None,
-        include_dataflow: bool = True,
-        include_control_flow: bool = True,
-        max_depth: int = 5,
-        timeout: int = 60,
+        codebase_hash: Annotated[str, Field(description="The session ID from create_cpg_session")],
+        node_id: Annotated[Optional[str], Field(description="Preferred: Direct CPG node ID of the target call (Get from list_calls or other query results). Example: '12345'")] = None,
+        location: Annotated[Optional[str], Field(description="Alternative: 'filename:line_number' or 'filename:line_number:call_name'. Example: 'main.c:42' or 'main.c:42:memcpy'")] = None,
+        include_dataflow: Annotated[bool, Field(description="Include dataflow (variable assignments) in slice")] = True,
+        include_control_flow: Annotated[bool, Field(description="Include control dependencies (if/while conditions)")] = True,
+        max_depth: Annotated[int, Field(description="Maximum depth for dataflow tracking")] = 5,
+        timeout: Annotated[int, Field(description="Maximum execution time in seconds")] = 60,
     ) -> Dict[str, Any]:
-        """
-        Build a program slice from a specific call node.
-
-        Creates a backward program slice showing all code that could affect the
-        execution at a specific point. This includes:
-        - The call itself and its arguments
-        - Dataflow: all assignments and operations affecting argument variables
-        - Control flow: conditions that determine whether the call executes
-        - Call graph: functions called and their data dependencies
-
-        **Important**: Use node IDs (from list_calls) or specify exact locations to
-        avoid ambiguity, especially when multiple calls appear on the same line.
-
-        Args:
-            codebase_hash: The session ID from create_cpg_session
-            node_id: Preferred: Direct CPG node ID of the target call
-                (Get from list_calls or other query results)
-                Example: "12345"
-            location: Alternative: "filename:line_number" or "filename:line_number:call_name"
-                Example: "main.c:42" or "main.c:42:memcpy"
-            include_dataflow: Include dataflow (variable assignments) in slice (default: true)
-            include_control_flow: Include control dependencies (if/while conditions) (default: true)
-            max_depth: Maximum depth for dataflow tracking (default: 5)
-            timeout: Maximum execution time in seconds (default: 60)
-
-        Returns:
-            {
-                "success": true,
-                "slice": {
-                    "target_call": {
-                        "node_id": "12345",
-                        "name": "memcpy",
-                        "code": "memcpy(buf, src, size)",
-                        "filename": "main.c",
-                        "lineNumber": 42,
-                        "method": "process_data",
-                        "arguments": ["buf", "src", "size"]
-                    },
-                    "dataflow": [
-                        {
-                            "variable": "buf",
-                            "code": "char buf[256]",
-                            "filename": "main.c",
-                            "lineNumber": 10,
-                            "method": "process_data"
-                        }
-                    ],
-                    "control_dependencies": [
-                        {
-                            "code": "if (user_input != NULL)",
-                            "filename": "main.c",
-                            "lineNumber": 35,
-                            "method": "process_data"
-                        }
-                    ]
-                },
-                "total_nodes": 15
-            }
-        """
+        """Build a program slice from a specific call node."""
         try:
             validate_codebase_hash(codebase_hash)
 

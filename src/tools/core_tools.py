@@ -11,7 +11,8 @@ import logging
 import os
 import shutil
 import tarfile
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Annotated
+from pydantic import Field
 
 from ..exceptions import ValidationError
 from ..models import CodebaseInfo
@@ -177,53 +178,44 @@ async def _generate_cpg_async(
 def register_core_tools(mcp, services: dict):
     """Register core MCP tools with the FastMCP server"""
 
-    @mcp.tool()
+    @mcp.tool(
+        description="""Generate a CPG for a codebase.
+
+This tool generates a Code Property Graph for the specified codebase.
+For GitHub repositories, it clones the repo first. For local paths,
+it copies the source code. The CPG is cached by codebase hash.
+
+Returns:
+    {
+        "codebase_hash": "hash of the codebase",
+        "status": "ready" | "generating" | "cached",
+        "message": "Status message",
+        "cpg_path": "path to CPG file"
+    }
+
+Examples:
+    # GitHub repository
+    generate_cpg(
+        source_type="github",
+        source_path="https://github.com/joernio/sample-repo",
+        language="java"
+    )
+
+    # Local directory
+    generate_cpg(
+        source_type="local",
+        source_path="/home/user/projects/myapp",
+        language="python"
+    )"""
+    )
     async def generate_cpg(
-        source_type: str,
-        source_path: str,
-        language: str,
-        github_token: Optional[str] = None,
-        branch: Optional[str] = None,
+        source_type: Annotated[str, Field(description="Either 'local' or 'github'")],
+        source_path: Annotated[str, Field(description="For local: absolute path to source directory. For github: full GitHub URL (e.g., https://github.com/user/repo)")],
+        language: Annotated[str, Field(description="Programming language - one of: java, c, cpp, javascript, python, go, kotlin, csharp, ghidra, jimple, php, ruby, swift")],
+        github_token: Annotated[Optional[str], Field(description="GitHub Personal Access Token for private repositories (optional)")] = None,
+        branch: Annotated[Optional[str], Field(description="Specific git branch to checkout (optional, defaults to default branch)")] = None,
     ) -> Dict[str, Any]:
-        """
-        Generate a CPG for a codebase.
-
-        This tool generates a Code Property Graph for the specified codebase.
-        For GitHub repositories, it clones the repo first. For local paths,
-        it copies the source code. The CPG is cached by codebase hash.
-
-        Args:
-            source_type: Either "local" or "github"
-            source_path: For local: absolute path to source directory
-                        For github: full GitHub URL (e.g., https://github.com/user/repo)
-            language: Programming language - one of: java, c, cpp, javascript,
-                        python, go, kotlin, csharp, ghidra, jimple, php, ruby, swift
-            github_token: GitHub Personal Access Token for private repositories (optional)
-            branch: Specific git branch to checkout (optional, defaults to default branch)
-
-        Returns:
-            {
-                "codebase_hash": "hash of the codebase",
-                "status": "ready" | "generating" | "cached",
-                "message": "Status message",
-                "cpg_path": "path to CPG file"
-            }
-
-        Examples:
-            # GitHub repository
-            generate_cpg(
-                source_type="github",
-                source_path="https://github.com/joernio/sample-repo",
-                language="java"
-            )
-
-            # Local directory
-            generate_cpg(
-                source_type="local",
-                source_path="/home/user/projects/myapp",
-                language="python"
-            )
-        """
+        """Generate a CPG for a codebase."""
         try:
             # Validate inputs
             validate_source_type(source_type)
@@ -396,26 +388,25 @@ def register_core_tools(mcp, services: dict):
                 "error": {"code": "INTERNAL_ERROR", "message": str(e)},
             }
 
-    @mcp.tool()
-    def get_cpg_status(codebase_hash: str) -> Dict[str, Any]:
-        """
-        Get the status of a CPG generation or check if CPG exists.
+    @mcp.tool(
+        description="""Get the status of a CPG generation or check if CPG exists.
 
-        Args:
-            codebase_hash: The hash identifier of the codebase
-
-        Returns:
-            {
-                "codebase_hash": "hash",
-                "status": "ready|generating|failed|not_found",
-                "cpg_path": "path to CPG if exists",
-                "joern_port": port number or null,
-                "source_type": "local/github",
-                "language": "programming language",
-                "container_codebase_path": path in container,
-                "container_cpg_path": path in container
-            }
-        """
+Returns:
+    {
+        "codebase_hash": "hash",
+        "status": "ready|generating|failed|not_found",
+        "cpg_path": "path to CPG if exists",
+        "joern_port": port number or null,
+        "source_type": "local/github",
+        "language": "programming language",
+        "container_codebase_path": path in container,
+        "container_cpg_path": path in container
+    }"""
+    )
+    def get_cpg_status(
+        codebase_hash: Annotated[str, Field(description="The hash identifier of the codebase")]
+    ) -> Dict[str, Any]:
+        """Get the status of a CPG generation or check if CPG exists."""
         try:
             codebase_tracker = services["codebase_tracker"]
             

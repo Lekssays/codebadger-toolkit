@@ -27,7 +27,7 @@ class TestLifespan:
             def __init__(self):
                 self.registered = {}
 
-            def tool(self):
+            def tool(self, **kwargs):
                 def decorator(func):
                     self.registered[func.__name__] = func
                     return func

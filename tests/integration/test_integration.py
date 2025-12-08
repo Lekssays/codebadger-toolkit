@@ -340,7 +340,8 @@ class TestCodeBadgerIntegration:
             assert field in summary, f"Summary missing field: {field}"
 
         assert summary["language"] in ["c", "C", "unknown"], f"Unexpected language: {summary['language']}"
-        assert summary["total_files"] >= 1 or summary["total_methods"] >= 1, "Should have at least 1 file or method"
+        print(f"DEBUG SUMMARY: {summary}")
+        assert summary["total_files"] >= 1 or summary["total_methods"] >= 1, f"Should have at least 1 file or method. Got summary: {summary}"
         assert summary["total_methods"] >= 0
         assert summary["total_calls"] >= 0
 
