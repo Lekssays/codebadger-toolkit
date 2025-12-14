@@ -24,19 +24,33 @@ def register_code_browsing_tools(mcp, services: dict):
     @mcp.tool(
         description="""List methods/functions in the codebase.
 
-Discover all methods and functions defined in the analyzed code. This is
-essential for understanding the codebase structure and finding specific
-functions to analyze.
+Discover all methods and functions defined in the analyzed code.
+
+Args:
+    codebase_hash: The codebase hash.
+    name_pattern: Regex filter for method name.
+    file_pattern: Regex filter for filename.
+    callee_pattern: Regex filter for methods that call this specific function.
+    include_external: Include external (library) methods (default False).
+    limit: Max results.
+    page: Page number.
 
 Returns:
     {
         "success": true,
-        "methods": [...],
-        "total": 100,generate_cpg
+        "methods": [{"name": "main", "filename": "main.c", ...}],
+        "total": 100,
         "page": 1,
-        "page_size": 100,
-        "total_pages": 1
-    }"""
+        "total_pages": 5
+    }
+
+Notes:
+    - Use name_pattern to find specific methods.
+    - Use callee_pattern to find usages (e.g., who calls 'malloc').
+
+Examples:
+    list_methods(codebase_hash="abc", name_pattern=".*auth.*")
+    list_methods(codebase_hash="abc", callee_pattern="memcpy")"""
     )
     def list_methods(
         codebase_hash: Annotated[str, Field(description="The codebase hash from generate_cpg")],
@@ -48,7 +62,7 @@ Returns:
         page: Annotated[int, Field(description="Page number")] = 1,
         page_size: Annotated[int, Field(description="Number of results per page")] = 100,
     ) -> Dict[str, Any]:
-        """List methods/functions in the codebase."""
+        """Discover all methods and functions defined in the codebase."""
         try:
             code_browsing_service = services["code_browsing_service"]
             return code_browsing_service.list_methods(
@@ -77,15 +91,26 @@ Returns:
     @mcp.tool(
         description="""List source files in the codebase.
 
+Args:
+    codebase_hash: The codebase hash.
+    local_path: Optional relative path filter.
+    limit: Max results.
+    page: Page number.
+
 Returns:
     {
         "success": true,
-        "files": [...],
-        "total": 100,
-        "page": 1,
-        "page_size": 100,
-        "total_pages": 1
-    }"""
+        "files": ["main.c", "lib/utils.c", ...],
+        "total": 15,
+        "page": 1
+    }
+
+Notes:
+    - Returns logical paths in the CPG.
+
+Examples:
+    list_files(codebase_hash="abc")
+    list_files(codebase_hash="abc", local_path="src/lib")"""
     )
     def list_files(
         codebase_hash: Annotated[str, Field(description="The codebase hash from create_cpg_create")],
@@ -94,7 +119,7 @@ Returns:
         page: Annotated[int, Field(description="Page number")] = 1,
         page_size: Annotated[int, Field(description="Number of results per page")] = 100,
     ) -> Dict[str, Any]:
-        """List source files in the codebase."""
+        """Get all source files tracked in the CPG."""
         try:
             code_browsing_service = services["code_browsing_service"]
             return code_browsing_service.list_files(
@@ -122,7 +147,11 @@ Returns:
         description="""Get the source code of a specific method.
 
 Retrieve the actual source code for a method to understand its implementation.
-Useful when you need to examine the details of a specific function.
+
+Args:
+    codebase_hash: The codebase hash.
+    method_name: Exact name or regex for method.
+    filename: Optional filename to disambiguate.
 
 Returns:
     {
@@ -133,18 +162,24 @@ Returns:
                 "filename": "main.c",
                 "lineNumber": 10,
                 "lineNumberEnd": 20,
-                "code": "int main() {\\n    printf("Hello");\\n    return 0;\\n}"
+                "code": "int main() { ... }"
             }
-        ],
-        "total": 1
-    }"""
+        ]
+    }
+
+Notes:
+    - Returns list in case multiple methods match the pattern.
+
+Examples:
+    get_method_source(codebase_hash="abc", method_name="main")
+    get_method_source(codebase_hash="abc", method_name="init", filename="driver.c")"""
     )
     def get_method_source(
         codebase_hash: Annotated[str, Field(description="The codebase hash from generate_cpg")],
         method_name: Annotated[str, Field(description="Name of the method (can be regex pattern)")],
         filename: Annotated[Optional[str], Field(description="Optional filename to disambiguate methods with same name")] = None,
     ) -> Dict[str, Any]:
-        """Get the source code of a specific method."""
+        """Retrieve the full source code of a method by name."""
         try:
             validate_codebase_hash(codebase_hash)
 
@@ -278,18 +313,30 @@ Returns:
     @mcp.tool(
         description="""List function/method calls in the codebase.
 
-Discover call relationships between functions. Essential for understanding
-control flow and dependencies in the code.
+Discover call relationships between functions.
+
+Args:
+    codebase_hash: The codebase hash.
+    caller_pattern: Regex for the calling method.
+    callee_pattern: Regex for the called method.
+    limit: Max results.
+    page: Page number.
 
 Returns:
     {
         "success": true,
-        "calls": [...],
-        "total": 100,
-        "page": 1,
-        "page_size": 100,
-        "total_pages": 1
-    }"""
+        "calls": [
+            {"caller": "main", "callee": "printf", "fileName": "main.c", "lineNumber": 10}
+        ],
+        "total": 1
+    }
+
+Notes:
+    - Useful for finding where specific functions are used.
+
+Examples:
+    list_calls(codebase_hash="abc", callee_pattern="strcpy")
+    list_calls(codebase_hash="abc", caller_pattern="main")"""
     )
     def list_calls(
         codebase_hash: Annotated[str, Field(description="The codebase hash from generate_cpg")],
@@ -299,7 +346,7 @@ Returns:
         page: Annotated[int, Field(description="Page number")] = 1,
         page_size: Annotated[int, Field(description="Number of results per page")] = 100,
     ) -> Dict[str, Any]:
-        """List function/method calls in the codebase."""
+        """Find function call relationships in the codebase."""
         try:
             code_browsing_service = services["code_browsing_service"]
             return code_browsing_service.list_calls(
@@ -328,8 +375,13 @@ Returns:
         description="""Get the call graph for a specific method.
 
 Understand what functions a method calls (outgoing) or what functions
-call it (incoming). Essential for impact analysis and understanding
-code dependencies.
+call it (incoming).
+
+Args:
+    codebase_hash: The codebase hash.
+    method_name: Name of the method to analyze.
+    depth: Traversal depth (default 5).
+    direction: 'outgoing' (callees) or 'incoming' (callers).
 
 Returns:
     {
@@ -339,9 +391,15 @@ Returns:
         "calls": [
             {"from": "authenticate", "to": "validate_password", "depth": 1},
             {"from": "validate_password", "to": "hash_password", "depth": 2}
-        ],
-        "total": 2
-    }"""
+        ]
+    }
+
+Notes:
+    - Essential for impact analysis and understanding code dependencies.
+
+Examples:
+    get_call_graph(codebase_hash="abc", method_name="main", direction="outgoing")
+    get_call_graph(codebase_hash="abc", method_name="vuln_func", direction="incoming")"""
     )
     def get_call_graph(
         codebase_hash: Annotated[str, Field(description="The codebase hash from generate_cpg")],
@@ -349,7 +407,7 @@ Returns:
         depth: Annotated[int, Field(description="How many levels deep to traverse (max recommended: 10)")] = 5,
         direction: Annotated[str, Field(description="Either 'outgoing' (callees) or 'incoming' (callers)")] = "outgoing",
     ) -> Dict[str, Any]:
-        """Get the call graph for a specific method."""
+        """Build the call graph showing callers or callees for a method."""
         try:
             validate_codebase_hash(codebase_hash)
 
@@ -588,7 +646,11 @@ Returns:
         description="""List parameters of a specific method.
 
 Get detailed information about method parameters including their names,
-types, and order. Useful for understanding function signatures.
+types, and order.
+
+Args:
+    codebase_hash: The codebase hash.
+    method_name: Method name pattern.
 
 Returns:
     {
@@ -601,15 +663,20 @@ Returns:
                     {"name": "password", "type": "string", "index": 2}
                 ]
             }
-        ],
-        "total": 1
-    }"""
+        ]
+    }
+
+Notes:
+    - Useful for understanding function signatures.
+
+Examples:
+    list_parameters(codebase_hash="abc", method_name="login")"""
     )
     def list_parameters(
         codebase_hash: Annotated[str, Field(description="The codebase hash from generate_cpg")],
         method_name: Annotated[str, Field(description="Name of the method (can be regex pattern)")],
     ) -> Dict[str, Any]:
-        """List parameters of a specific method."""
+        """Get parameter names, types, and order for a method."""
         try:
             code_browsing_service = services["code_browsing_service"]
             return code_browsing_service.list_parameters(
@@ -633,9 +700,11 @@ Returns:
     @mcp.tool(
         description="""Get a high-level summary of the codebase structure.
 
-
 Provides an overview including file count, method count, language,
-and other metadata. Useful as a first step when exploring a new codebase.
+and other metadata.
+
+Args:
+    codebase_hash: The codebase hash.
 
 Returns:
     {
@@ -643,17 +712,21 @@ Returns:
         "summary": {
             "language": "C",
             "total_files": 15,
-            "total_methods": 127,
-            "total_calls": 456,
-            "external_methods": 89,
+            "total_methods": 127
             "lines_of_code": 5432
         }
-    }"""
+    }
+
+Notes:
+    - Useful as a first step when exploring a new codebase.
+
+Examples:
+    get_codebase_summary(codebase_hash="abc")"""
     )
     def get_codebase_summary(
         codebase_hash: Annotated[str, Field(description="The codebase hash from generate_cpg")]
     ) -> Dict[str, Any]:
-        """Get a high-level summary of the codebase structure."""
+        """Get file count, method count, and other high-level metrics."""
         try:
             validate_codebase_hash(codebase_hash)
 
@@ -789,7 +862,12 @@ Returns:
         description="""Retrieve a code snippet from a specific file with line range.
 
 Get the source code from a file between specified start and end line numbers.
-Useful for examining specific parts of the codebase.
+
+Args:
+    codebase_hash: The codebase hash.
+    filename: Relative path to source file.
+    start_line: Start line (1-indexed).
+    end_line: End line (1-indexed).
 
 Returns:
     {
@@ -798,7 +876,13 @@ Returns:
         "start_line": 10,
         "end_line": 20,
         "code": "example code here"
-    }"""
+    }
+
+Notes:
+    - Useful for examining specific parts of the codebase.
+
+Examples:
+    get_code_snippet(codebase_hash="abc", filename="main.c", start_line=10, end_line=20)"""
     )
     def get_code_snippet(
         codebase_hash: Annotated[str, Field(description="The codebase hash from generate_cpg")],
@@ -806,7 +890,7 @@ Returns:
         start_line: Annotated[int, Field(description="Starting line number (1-indexed)")],
         end_line: Annotated[int, Field(description="Ending line number (1-indexed, inclusive)")],
     ) -> Dict[str, Any]:
-        """Retrieve a code snippet from a specific file with line range."""
+        """Read specific lines from a source file."""
         try:
             validate_codebase_hash(codebase_hash)
 
@@ -896,17 +980,27 @@ Returns:
         description="""Execute a raw CPGQL query against the codebase.
 
 Run arbitrary Code Property Graph Query Language (CPGQL) queries
-for advanced analysis and exploration of the codebase structure.
+for advanced analysis.
+
+Args:
+    codebase_hash: The codebase hash.
+    query: The CPGQL query string.
+    timeout: Optional execution timeout.
+    validate: Validate syntax before execution (default False).
 
 Returns:
     {
         "success": true,
-        "stdout": "raw stdout output",
-        "stderr": "raw stderr output if any",
-        "execution_time": 1.23,
-        "validation": {...},
-        "suggestion": "helpful hint if error occurs"
-    }"""
+        "stdout": "raw output",
+        "stderr": "error output"
+    }
+
+Notes:
+    - Power user tool. Requires knowledge of Joern CPGQL.
+    - Use get_cpgql_syntax_help for reference.
+
+Examples:
+    run_cpgql_query(codebase_hash="abc", query="cpg.method.name.l")"""
     )
     def run_cpgql_query(
         codebase_hash: Annotated[str, Field(description="The codebase hash from generate_cpg")],
@@ -914,7 +1008,7 @@ Returns:
         timeout: Annotated[Optional[int], Field(description="Optional timeout in seconds")] = None,
         validate: Annotated[bool, Field(description="If true, validate query syntax before executing")] = False,
     ) -> Dict[str, Any]:
-        """Execute a raw CPGQL query against the codebase."""
+        """Run a raw CPGQL query for custom CPG analysis."""
         try:
             from ..utils.cpgql_validator import CPGQLValidator, QueryTransformer
             import time
@@ -1001,29 +1095,33 @@ Returns:
         description="""Find bounds checks near buffer access.
 
 Verify if buffer accesses have corresponding bounds checks by analyzing
-comparison operations involving the index variable. This helps identify
-potential buffer overflow vulnerabilities where bounds checks are missing
-or happen after the access.
+comparison operations involving the index variable.
+
+Args:
+    codebase_hash: The codebase hash.
+    buffer_access_location: 'filename:line' of the access (e.g., 'buf[i] = x').
 
 Returns:
     {
         "success": true,
-        "buffer_access": {
-            "line": 3393,
-            "code": "buf[len++] = c",
-            "buffer": "buf",
-            "index": "len++"
-        },
-        "bounds_checks": [ ... ],
-        "check_before_access": false,
-        "check_after_access": true
-    }"""
+        "buffer_access": {...},
+        "bounds_checks": [...],
+        "check_before_access": true,
+        "check_after_access": false
+    }
+
+Notes:
+    - Helps identify potential buffer overflow vulnerabilities.
+    - Checks for missing bounds checks or checks that happen too late.
+
+Examples:
+    find_bounds_checks(codebase_hash="abc", buffer_access_location="parser.c:3393")"""
     )
     def find_bounds_checks(
         codebase_hash: Annotated[str, Field(description="The codebase hash from generate_cpg")],
         buffer_access_location: Annotated[str, Field(description="Location of buffer access in format 'filename:line' (e.g., 'parser.c:3393')")],
     ) -> Dict[str, Any]:
-        """Find bounds checks near buffer access."""
+        """Check if buffer accesses have proper bounds validation."""
         try:
             validate_codebase_hash(codebase_hash)
 
@@ -1227,19 +1325,27 @@ Returns:
     @mcp.tool(
         description="""Get comprehensive CPGQL syntax help and examples.
 
-Provides syntax documentation, common patterns, node types, and error solutions
-for CPGQL query writing.
+Provides syntax documentation, common patterns, node types, and error solutions.
+
+Args:
+    None.
 
 Returns:
     {
         "success": true,
-        "syntax_helpers": { ... },
-        "error_guide": { ... },
-        "quick_reference": { ... }
-    }"""
+        "syntax_helpers": {...},
+        "error_guide": {...},
+        "quick_reference": {...}
+    }
+
+Notes:
+    - Use this to learn how to write queries for run_cpgql_query.
+
+Examples:
+    get_cpgql_syntax_help()"""
     )
     def get_cpgql_syntax_help() -> Dict[str, Any]:
-        """Get comprehensive CPGQL syntax help and examples."""
+        """Get CPGQL syntax documentation and common query patterns."""
         try:
             from ..utils.cpgql_validator import CPGQLValidator
             
@@ -1335,17 +1441,35 @@ Returns:
     @mcp.tool(
         description="""Get control flow graph (CFG) for a method.
 
-Returns nodes and edges representing control flow. Essential for understanding
-loops, conditions, and execution paths for exploit analysis.
+Returns nodes and edges representing control flow.
 
-Returns: {success, method_name, cfg: {nodes: [{id, code, type}], edges: [{from, to, label}]}}"""
+Args:
+    codebase_hash: The codebase hash.
+    method_name: Name of the method.
+    max_nodes: Limit nodes returned (default 100).
+
+Returns:
+    {
+        "success": true,
+        "method_name": "main",
+        "cfg": {
+            "nodes": [{"id": "1", "code": "if (x)", "type": "ControlStructure"}],
+            "edges": [{"from": "1", "to": "2", "label": "TRUE"}]
+        }
+    }
+
+Notes:
+    - Essential for understanding loops, conditions, and execution paths.
+
+Examples:
+    get_cfg(codebase_hash="abc", method_name="main")"""
     )
     def get_cfg(
         codebase_hash: Annotated[str, Field(description="The codebase hash from generate_cpg")],
         method_name: Annotated[str, Field(description="Name of the method (can be regex pattern)")],
         max_nodes: Annotated[int, Field(description="Maximum CFG nodes to return (for large methods)")] = 100,
     ) -> Dict[str, Any]:
-        """Get control flow graph for a method."""
+        """Get nodes and edges representing control flow in a method."""
         try:
             validate_codebase_hash(codebase_hash)
             codebase_tracker = services["codebase_tracker"]
@@ -1440,17 +1564,37 @@ Returns: {success, method_name, cfg: {nodes: [{id, code, type}], edges: [{from, 
     @mcp.tool(
         description="""Get type/struct definition with members.
 
-Inspect struct or class memory layouts without reading header files.
-Essential for understanding buffer sizes and memory layouts.
+Inspect struct or class memory layouts.
 
-Returns: {success, types: [{name, fullName, filename, lineNumber, members: [{name, type}]}]}"""
+Args:
+    codebase_hash: The codebase hash.
+    type_name: Regex for type name.
+    limit: Max results.
+
+Returns:
+    {
+        "success": true,
+        "types": [
+            {
+                "name": "UserStruct",
+                "members": [{"name": "id", "type": "int"}, {"name": "buf", "type": "char*"}]
+            }
+        ]
+    }
+
+Notes:
+    - Essential for understanding buffer sizes and memory layouts.
+    - Does not read header files; uses CPG type info.
+
+Examples:
+    get_type_definition(codebase_hash="abc", type_name=".*request_t.*")"""
     )
     def get_type_definition(
         codebase_hash: Annotated[str, Field(description="The codebase hash from generate_cpg")],
         type_name: Annotated[str, Field(description="Type name pattern (regex, e.g., '.*Buffer.*')")],
         limit: Annotated[int, Field(description="Maximum types to return")] = 10,
     ) -> Dict[str, Any]:
-        """Get type/struct definition with members."""
+        """Get struct/class definition with member names and types."""
         try:
             validate_codebase_hash(codebase_hash)
             codebase_tracker = services["codebase_tracker"]
@@ -1520,22 +1664,34 @@ Returns: {success, types: [{name, fullName, filename, lineNumber, members: [{nam
     @mcp.tool(
         description="""Check if calls at a location might be macro expansions.
 
-Detects potential macros using heuristics (NOT definitive):
-- INLINED dispatch type (rare, depends on frontend)
-- ALL_CAPS naming convention (e.g., COPY_BUF, MAX_SIZE)
+Detects potential macros using heuristics (naming conventions, dispatch type).
 
-LIMITATION: C/C++ macros are expanded by the preprocessor BEFORE
-Joern analyzes the code. The CPG sees the expanded code, not the
-original macro. This tool uses naming patterns as best-effort detection.
+Args:
+    codebase_hash: The codebase hash.
+    filename: Filename (partial).
+    line_number: Optional line number.
 
-Returns unique call names. {success, calls: [{name, is_macro, macro_hints, ...}]}"""
+Returns:
+    {
+        "success": true,
+        "calls": [
+            {"name": "COPY_BUF", "is_macro": true, "macro_hints": ["ALL_CAPS"]}
+        ]
+    }
+
+Notes:
+    - Heuristic only (NOT definitive).
+    - C/C++ macros are expanded before the CPG is built.
+
+Examples:
+    get_macro_expansion(codebase_hash="abc", filename="main.c", line_number=42)"""
     )
     def get_macro_expansion(
         codebase_hash: Annotated[str, Field(description="The codebase hash from generate_cpg")],
         filename: Annotated[str, Field(description="Filename to search (partial match)")],
         line_number: Annotated[Optional[int], Field(description="Optional line number to filter")] = None,
     ) -> Dict[str, Any]:
-        """Check for macro expansions at a location."""
+        """Detect potential macro expansions using naming heuristics."""
         try:
             validate_codebase_hash(codebase_hash)
             codebase_tracker = services["codebase_tracker"]

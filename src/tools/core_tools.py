@@ -179,11 +179,18 @@ def register_core_tools(mcp, services: dict):
     """Register core MCP tools with the FastMCP server"""
 
     @mcp.tool(
-        description="""Generate a CPG for a codebase.
+        description="""Generate a Code Property Graph (CPG) for a codebase.
 
-This tool generates a Code Property Graph for the specified codebase.
-For GitHub repositories, it clones the repo first. For local paths,
-it copies the source code. The CPG is cached by codebase hash.
+This tool initiates the analysis process by generating a CPG for the specified codebase.
+For GitHub repositories, it clones the repo first. For local paths, it copies the source code.
+The CPG is cached by a hash of the codebase.
+
+Args:
+    source_type: Either 'local' or 'github'.
+    source_path: Absolute path (local) or full GitHub URL.
+    language: Programming language (java, c, cpp, python, javascript, go, etc.).
+    github_token: Optional PAT for private repos.
+    branch: Optional specific git branch.
 
 Returns:
     {
@@ -193,19 +200,16 @@ Returns:
         "cpg_path": "path to CPG file"
     }
 
+Notes:
+    - This is an async operation. Use get_cpg_status to check progress.
+    - Large codebases may take several minutes to analyze.
+    - Supported languages: c, cpp, java, javascript, python, go, kotlin, csharp, php, ruby, swift.
+
 Examples:
-    # GitHub repository
     generate_cpg(
         source_type="github",
         source_path="https://github.com/joernio/sample-repo",
         language="java"
-    )
-
-    # Local directory
-    generate_cpg(
-        source_type="local",
-        source_path="/home/user/projects/myapp",
-        language="python"
     )"""
     )
     async def generate_cpg(
@@ -215,7 +219,7 @@ Examples:
         github_token: Annotated[Optional[str], Field(description="GitHub Personal Access Token for private repositories (optional)")] = None,
         branch: Annotated[Optional[str], Field(description="Specific git branch to checkout (optional, defaults to default branch)")] = None,
     ) -> Dict[str, Any]:
-        """Generate a CPG for a codebase."""
+        """Create a Code Property Graph from source code for analysis."""
         try:
             # Validate inputs
             validate_source_type(source_type)
@@ -391,22 +395,32 @@ Examples:
     @mcp.tool(
         description="""Get the status of a CPG generation or check if CPG exists.
 
+Check if the analysis for a given codebase hash is complete and the CPG is ready.
+Also retrieves the connection port for the Joern server if running.
+
+Args:
+    codebase_hash: The unique hash identifier returned by generate_cpg.
+
 Returns:
     {
         "codebase_hash": "hash",
-        "status": "ready|generating|failed|not_found",
+        "status": "ready" | "generating" | "failed" | "not_found",
         "cpg_path": "path to CPG if exists",
         "joern_port": port number or null,
-        "source_type": "local/github",
-        "language": "programming language",
-        "container_codebase_path": path in container,
-        "container_cpg_path": path in container
-    }"""
+        "language": "programming language"
+    }
+
+Notes:
+    - If status is 'ready', the CPG is available for queries.
+    - If status is 'generating', wait and retry.
+
+Examples:
+    get_cpg_status(codebase_hash="abc123456789")"""
     )
     def get_cpg_status(
         codebase_hash: Annotated[str, Field(description="The hash identifier of the codebase")]
     ) -> Dict[str, Any]:
-        """Get the status of a CPG generation or check if CPG exists."""
+        """Check CPG generation status or verify if a CPG exists and is ready."""
         try:
             codebase_tracker = services["codebase_tracker"]
             

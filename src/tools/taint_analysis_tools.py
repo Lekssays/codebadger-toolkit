@@ -23,27 +23,31 @@ def register_taint_analysis_tools(mcp, services: dict):
         description="""Locate likely external input points (taint sources).
 
 Search for function calls that could be entry points for untrusted data,
-such as user input, environment variables, or network data. Useful for
-identifying where external data enters the program.
+such as user input, environment variables, or network data.
 
-The tool uses a comprehensive list of default sources configured in the
-system configuration unless specific patterns are provided.
+Args:
+    codebase_hash: The codebase hash from generate_cpg.
+    language: Optional language (c, java) for default patterns.
+    source_patterns: Optional list of regex patterns for source functions (e.g., ['getenv', 'read']).
+    filename: Optional regex to filter by filename.
+    limit: Max results (default 200).
 
 Returns:
     {
         "success": true,
         "sources": [
-            {
-                "node_id": "12345",
-                "name": "getenv",
-                "code": "getenv(\"PATH\")",
-                "filename": "main.c",
-                "lineNumber": 42,
-                "method": "main"
-            }
+            {"node_id": "...", "name": "getenv", "code": "getenv(...)", "filename": "...", "lineNumber": 42}
         ],
         "total": 1
-    }"""
+    }
+
+Notes:
+    - Uses default security patterns if no custom patterns provided.
+    - Sources are the starting points for taint analysis.
+
+Examples:
+    find_taint_sources(codebase_hash="abc", language="c")
+    find_taint_sources(codebase_hash="abc", source_patterns=["read_from_socket"])"""
     )
     def find_taint_sources(
         codebase_hash: Annotated[str, Field(description="The codebase hash from generate_cpg")],
@@ -52,7 +56,7 @@ Returns:
         filename: Annotated[Optional[str], Field(description="Optional filename to filter results (e.g., 'shell.c', 'main.c'). Uses regex matching, so partial names work (e.g., 'shell' matches 'shell.c')")] = None,
         limit: Annotated[int, Field(description="Maximum number of results to return")] = 200,
     ) -> Dict[str, Any]:
-        """Locate likely external input points (taint sources)."""
+        """Find function calls that are entry points for external/untrusted data."""
         try:
             validate_codebase_hash(codebase_hash)
 
@@ -143,26 +147,30 @@ Returns:
 
 Search for function calls that could be security-sensitive destinations
 for data, such as system execution, file operations, or format strings.
-Useful for identifying where untrusted data could cause harm.
 
-The tool uses a comprehensive list of default sinks configured in the
-system configuration unless specific patterns are provided.
+Args:
+    codebase_hash: The codebase hash from generate_cpg.
+    language: Optional language (c, java) for default patterns.
+    sink_patterns: Optional list of regex patterns for sink functions (e.g., ['system', 'exec']).
+    filename: Optional regex to filter by filename.
+    limit: Max results (default 200).
 
 Returns:
     {
         "success": true,
         "sinks": [
-            {
-                "node_id": "67890",
-                "name": "system",
-                "code": "system(cmd)",
-                "filename": "main.c",
-                "lineNumber": 100,
-                "method": "execute_command"
-            }
+            {"node_id": "...", "name": "system", "code": "system(...)", "filename": "...", "lineNumber": 100}
         ],
         "total": 1
-    }"""
+    }
+
+Notes:
+    - Uses default dangerous function lists if no patterns provided.
+    - Sinks are the destinations where tainted data causes harm.
+
+Examples:
+    find_taint_sinks(codebase_hash="abc", language="c")
+    find_taint_sinks(codebase_hash="abc", sink_patterns=["custom_exec"])"""
     )
     def find_taint_sinks(
         codebase_hash: Annotated[str, Field(description="The codebase hash from generate_cpg")],
@@ -171,7 +179,7 @@ Returns:
         filename: Annotated[Optional[str], Field(description="Optional filename to filter results (e.g., 'shell.c', 'main.c'). Uses regex matching, so partial names work (e.g., 'shell' matches 'shell.c')")] = None,
         limit: Annotated[int, Field(description="Maximum number of results to return")] = 200,
     ) -> Dict[str, Any]:
-        """Locate dangerous sinks where tainted data could cause vulnerabilities."""
+        """Find security-sensitive function calls where untrusted data could cause harm."""
         try:
             validate_codebase_hash(codebase_hash)
 
@@ -258,14 +266,36 @@ Returns:
     @mcp.tool(
         description="""Track data flow from source to sink via variable assignments.
 
-Modes:
-- Forward: Provide source_location → finds all dangerous sinks using the variable
-- Backward: Provide sink_location → finds all dangerous sources flowing into it
-- Point-to-point: Provide both → checks if specific flow exists
+Traces data flow through simple assignments within the same function or via
+defined source/sink points.
 
-Intra-procedural only (same function). Uses identifier matching, not full taint analysis.
+Args:
+    codebase_hash: The codebase hash.
+    source_location: 'file:line' or 'file:line:method' for source.
+    sink_location: 'file:line' or 'file:line:method' for sink.
+    source_pattern: Regex for source functions (if location not given).
+    sink_pattern: Regex for sink functions (if location not given).
+    filename_filter: Filter to specific file.
 
-Returns: {success, mode, flows: [{source, sink, variable, path_length}], total}"""
+Returns:
+    {
+        "success": true,
+        "mode": "forward|backward|point-to-point",
+        "flows": [
+            {"source": {...}, "sink": {...}, "variable": "varname", "path_length": 3}
+        ]
+    }
+
+Notes:
+    - Intra-procedural only: Tracks variables within the same function or global identifiers.
+    - Modes:
+        * Forward: Source given -> Find all Sinks.
+        * Backward: Sink given -> Find all Sources.
+        * Point-to-Point: Both given -> Verify connection.
+
+Examples:
+    find_taint_flows(codebase_hash="abc", source_location="main.c:20")
+    find_taint_flows(codebase_hash="abc", sink_location="main.c:50")"""
     )
     def find_taint_flows(
         codebase_hash: Annotated[str, Field(description="The codebase hash from generate_cpg")],
@@ -277,7 +307,7 @@ Returns: {success, mode, flows: [{source, sink, variable, path_length}], total}"
         max_results: Annotated[int, Field(description="Maximum number of flows to return")] = 10,
         timeout: Annotated[int, Field(description="Maximum execution time in seconds")] = 60,
     ) -> Dict[str, Any]:
-        """Track data flow from source to sink via variable assignments."""
+        """Find data flow paths between sources and sinks using variable tracking."""
         try:
             validate_codebase_hash(codebase_hash)
 
@@ -478,33 +508,34 @@ Returns: {success, mode, flows: [{source, sink, variable, path_length}], total}"
         description="""Build a program slice from a specific call node.
 
 Creates a backward program slice showing all code that could affect the
-execution at a specific point. This includes:
-- The call itself and its arguments
-- Dataflow: all assignments and operations affecting argument variables
-- Control flow: conditions that determine whether the call executes
-- Call graph: functions called and their data dependencies
+execution at a specific point (dataflow and control dependencies).
 
-**Important**: Use node IDs (from list_calls) or specify exact locations to
-avoid ambiguity, especially when multiple calls appear on the same line.
+Args:
+    codebase_hash: The codebase hash.
+    node_id: Precise CPG node ID of the target call.
+    location: Alternative 'file:line' specifier.
+    include_dataflow: Track variable assignments (default True).
+    include_control_flow: Track if/while conditions (default True).
+    max_depth: limit for backward traversal.
 
 Returns:
     {
         "success": true,
         "slice": {
-            "target_call": {
-                "node_id": "12345",
-                "name": "memcpy",
-                "code": "memcpy(buf, src, size)",
-                "filename": "main.c",
-                "lineNumber": 42,
-                "method": "process_data",
-                "arguments": ["buf", "src", "size"]
-            },
-            "dataflow": [ ... ],
-            "control_dependencies": [ ... ]
+            "target_call": {...},
+            "dataflow": [...],
+            "control_dependencies": [...]
         },
-        "total_nodes": 15
-    }"""
+        "total_nodes": N
+    }
+
+Notes:
+    - Use node_id for precision when multiple calls exist on one line.
+    - Essential for understanding the context of a potential vulnerability.
+
+Examples:
+    get_program_slice(codebase_hash="abc", location="main.c:42")
+    get_program_slice(codebase_hash="abc", node_id="100234")"""
     )
     def get_program_slice(
         codebase_hash: Annotated[str, Field(description="The codebase hash from generate_cpg")],
@@ -515,7 +546,7 @@ Returns:
         max_depth: Annotated[int, Field(description="Maximum depth for dataflow tracking")] = 5,
         timeout: Annotated[int, Field(description="Maximum execution time in seconds")] = 60,
     ) -> Dict[str, Any]:
-        """Build a program slice from a specific call node."""
+        """Get backward slice showing all code affecting execution at a specific call."""
         try:
             validate_codebase_hash(codebase_hash)
 
@@ -738,12 +769,33 @@ Returns:
 
 
     @mcp.tool(
-        description="""Analyze variable data flow in backward or forward direction.
+        description="""Analyze data dependencies for a variable at a specific location.
 
-Backward: Find definitions, assignments, and modifications affecting a variable.
-Forward: Find usages and propagations of a variable.
+Finds code locations that influence (backward) or are influenced by (forward)
+a variable.
 
-Returns: {success, target: {file, line, variable, method}, direction, dependencies: [{line, code, type, filename}], total}"""
+Args:
+    codebase_hash: The codebase hash.
+    location: "filename:line" (e.g., "parser.c:3393").
+    variable: Variable name to analyze.
+    direction: "backward" (definitions) or "forward" (usages).
+
+Returns:
+    {
+        "success": true,
+        "target": { "file": "...", "line": 10, "variable": "x" },
+        "dependencies": [
+            {"line": 5, "code": "int x = 0;", "type": "initialization"}
+        ],
+        "direction": "backward"
+    }
+
+Notes:
+    - Backward: Finds initialization, assignment, and modification.
+    - Forward: Finds usage as argument and propagation to other vars.
+
+Examples:
+    get_variable_flow(codebase_hash="abc", location="main.c:50", variable="len", direction="backward")"""
     )
     def get_variable_flow(
         codebase_hash: str,
@@ -751,15 +803,7 @@ Returns: {success, target: {file, line, variable, method}, direction, dependenci
         variable: str,
         direction: str = "backward",
     ) -> Dict[str, Any]:
-        """
-        Analyze variable data flow.
-
-        Args:
-            codebase_hash: The codebase hash from generate_cpg
-            location: Location as "filename:line" (e.g., "parser.c:3393")
-            variable: Variable name to analyze (e.g., "len", "buffer")
-            direction: "backward" (what affects it) or "forward" (what it affects)
-        """
+        """Analyze variable data dependencies in backward or forward direction."""
         try:
             validate_codebase_hash(codebase_hash)
 
