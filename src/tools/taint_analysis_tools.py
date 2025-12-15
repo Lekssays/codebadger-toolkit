@@ -29,7 +29,7 @@ Args:
     codebase_hash: The codebase hash from generate_cpg.
     language: Optional language (c, java) for default patterns.
     source_patterns: Optional list of regex patterns for source functions (e.g., ['getenv', 'read']).
-    filename: Optional regex to filter by filename.
+    filename: Optional regex to filter by filename (relative to project root).
     limit: Max results (default 200).
 
 Returns:
@@ -44,6 +44,7 @@ Returns:
 Notes:
     - Uses default security patterns if no custom patterns provided.
     - Sources are the starting points for taint analysis.
+    - filename should be relative to the project root (e.g., 'src/shell.c').
 
 Examples:
     find_taint_sources(codebase_hash="abc", language="c")
@@ -152,7 +153,7 @@ Args:
     codebase_hash: The codebase hash from generate_cpg.
     language: Optional language (c, java) for default patterns.
     sink_patterns: Optional list of regex patterns for sink functions (e.g., ['system', 'exec']).
-    filename: Optional regex to filter by filename.
+    filename: Optional regex to filter by filename (relative to project root).
     limit: Max results (default 200).
 
 Returns:
@@ -167,6 +168,7 @@ Returns:
 Notes:
     - Uses default dangerous function lists if no patterns provided.
     - Sinks are the destinations where tainted data causes harm.
+    - filename should be relative to the project root (e.g., 'src/shell.c').
 
 Examples:
     find_taint_sinks(codebase_hash="abc", language="c")
@@ -274,9 +276,9 @@ Args:
     codebase_hash: The codebase hash from generate_cpg.
     source_pattern: Regex for source functions (e.g., 'fread|getenv|scanf').
     sink_pattern: Regex for sink functions (e.g., 'memcpy|strcpy|system').
-    source_location: Alternative: specific source at 'file:line'.
-    sink_location: Alternative: specific sink at 'file:line'.
-    filename_filter: Limit analysis to specific file.
+    source_location: Alternative: specific source at 'file:line' (file relative to project root).
+    sink_location: Alternative: specific sink at 'file:line' (file relative to project root).
+    filename_filter: Limit analysis to specific file (relative to project root).
     max_depth: Call depth for inter-procedural tracking (0=intra-procedural, 1+=inter-procedural).
 
 Returns:
@@ -298,6 +300,7 @@ Notes:
     - max_depth>=1: Inter-procedural (detects calls to functions containing sinks).
     - Use source_pattern + sink_pattern for broad analysis.
     - Use source_location/sink_location for targeted verification.
+    - All file paths should be relative to the project root (e.g., 'src/io.c:100').
 
 Examples:
     # Find flows from file I/O to memory operations (inter-procedural)
@@ -578,7 +581,7 @@ execution at a specific point (dataflow and control dependencies).
 Args:
     codebase_hash: The codebase hash.
     node_id: Precise CPG node ID of the target call.
-    location: Alternative 'file:line' specifier.
+    location: Alternative 'file:line' specifier (file relative to project root).
     include_dataflow: Track variable assignments (default True).
     include_control_flow: Track if/while conditions (default True).
     max_depth: limit for backward traversal.
@@ -597,6 +600,7 @@ Returns:
 Notes:
     - Use node_id for precision when multiple calls exist on one line.
     - Essential for understanding the context of a potential vulnerability.
+    - location file should be relative to the project root (e.g., 'src/main.c:42').
 
 Examples:
     get_program_slice(codebase_hash="abc", location="main.c:42")
@@ -842,7 +846,7 @@ a variable.
 
 Args:
     codebase_hash: The codebase hash.
-    location: "filename:line" (e.g., "parser.c:3393").
+    location: "filename:line" (e.g., "parser.c:3393"), filename relative to project root.
     variable: Variable name to analyze.
     direction: "backward" (definitions) or "forward" (usages).
 
@@ -859,6 +863,7 @@ Returns:
 Notes:
     - Backward: Finds initialization, assignment, and modification.
     - Forward: Finds usage as argument and propagation to other vars.
+    - location filename should be relative to the project root (e.g., 'src/main.c:50').
 
 Examples:
     get_variable_flow(codebase_hash="abc", location="main.c:50", variable="len", direction="backward")"""

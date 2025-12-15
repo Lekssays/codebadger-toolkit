@@ -151,7 +151,7 @@ Retrieve the actual source code for a method to understand its implementation.
 Args:
     codebase_hash: The codebase hash.
     method_name: Exact name or regex for method.
-    filename: Optional filename to disambiguate.
+    filename: Optional filename to disambiguate (relative to project root).
 
 Returns:
     {
@@ -169,6 +169,7 @@ Returns:
 
 Notes:
     - Returns list in case multiple methods match the pattern.
+    - filename should be relative to the project root (e.g., 'src/main.c' not '/absolute/path/src/main.c').
 
 Examples:
     get_method_source(codebase_hash="abc", method_name="main")
@@ -865,7 +866,7 @@ Get the source code from a file between specified start and end line numbers.
 
 Args:
     codebase_hash: The codebase hash.
-    filename: Relative path to source file.
+    filename: Relative path to source file (relative to project root).
     start_line: Start line (1-indexed).
     end_line: End line (1-indexed).
 
@@ -880,6 +881,7 @@ Returns:
 
 Notes:
     - Useful for examining specific parts of the codebase.
+    - filename should be relative to the project root (e.g., 'src/main.c' not '/absolute/path/src/main.c').
 
 Examples:
     get_code_snippet(codebase_hash="abc", filename="main.c", start_line=10, end_line=20)"""
@@ -1113,6 +1115,7 @@ Returns:
 Notes:
     - Helps identify potential buffer overflow vulnerabilities.
     - Checks for missing bounds checks or checks that happen too late.
+    - filename in buffer_access_location should be relative to the project root (e.g., 'src/parser.c:100').
 
 Examples:
     find_bounds_checks(codebase_hash="abc", buffer_access_location="parser.c:3393")"""
@@ -1668,7 +1671,7 @@ Detects potential macros using heuristics (naming conventions, dispatch type).
 
 Args:
     codebase_hash: The codebase hash.
-    filename: Filename (partial).
+    filename: Filename (partial, relative to project root).
     line_number: Optional line number.
 
 Returns:
@@ -1682,6 +1685,7 @@ Returns:
 Notes:
     - Heuristic only (NOT definitive).
     - C/C++ macros are expanded before the CPG is built.
+    - filename should be relative to the project root (e.g., 'src/main.c').
 
 Examples:
     get_macro_expansion(codebase_hash="abc", filename="main.c", line_number=42)"""
